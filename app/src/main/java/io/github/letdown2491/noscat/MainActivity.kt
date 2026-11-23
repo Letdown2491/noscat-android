@@ -914,7 +914,9 @@ private fun DeviceCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            PresenceDot(live = ClientHolder.liveTunnels[member.npub] == true)
+            PresenceDot(
+                live = member.online() || ClientHolder.liveTunnels[member.npub] == true,
+            )
             Spacer(Modifier.width(6.dp))
             // The name is the npub copy affordance: tap it and the full
             // npub is on the clipboard.
@@ -970,8 +972,16 @@ private fun DeviceCard(
         }
     }
 }
-/** Live-tunnel presence dot: green while a tunnel to that peer is up
- * (the same signal the Files tab's transfer card shows, per device). */
+/** Matches noscat-core's ADVERT_TTL_SECS: a node re-publishes its advert
+ * on this timer, so an advert younger than the TTL means the peer is up. */
+private const val ADVERT_TTL_SECS: ULong = 3600uL
+
+/** Online per the mesh presence: the peer's advert is fresh. */
+private fun MeshMember.online(): Boolean =
+    lastSeenSecs?.let { it < ADVERT_TTL_SECS } ?: false
+
+/** Live-tunnel presence dot: green while the peer looks online (fresh
+ * advert) or has a tunnel open right now. */
 @Composable
 private fun PresenceDot(live: Boolean) {
     if (!live) return
@@ -1143,7 +1153,9 @@ private fun ChatScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
-                            PresenceDot(live = ClientHolder.liveTunnels[m.npub] == true)
+                            PresenceDot(
+                                live = m.online() || ClientHolder.liveTunnels[m.npub] == true,
+                            )
                             Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
