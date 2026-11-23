@@ -1,11 +1,13 @@
 # noscat android
 
 Android client for [noscat](https://github.com/Letdown2491/noscat), the Nostr-native
-mesh VPN. Native Kotlin (Compose) over a Rust UniFFI bridge; the protocol lives in the
-published `noscat-client` crates, so this repo contains no protocol code.
+mesh VPN. Native Kotlin (Compose) over a Rust UniFFI bridge; the protocol lives in
+the noscat workspace (`noscat-core`/`noscat-client`/`noscat-ffi`), so this repo
+contains no protocol code.
 
 Status: phase 1 in progress - a remote-reach client (dial `forward` tunnels to peers,
-send and receive files). Roadmap and agent guidance in [AGENTS.md](AGENTS.md).
+send and receive files, join the owner's tailnet). Roadmap and agent guidance in
+[AGENTS.md](AGENTS.md).
 
 ## Building
 

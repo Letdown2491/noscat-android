@@ -23,7 +23,12 @@ layer stays native Kotlin instead of a cross-platform framework.
 1. **Zero protocol code in this repo.** If a change needs Noise, UDP framing, Nostr
    events, relay logic, or advert handling, it belongs in the noscat repo
    (`noscat-core` / `noscat-client` crates), published to crates.io, then bumped here.
-   The bridge crate `rust/` only adapts types across the FFI.
+2. **The FFI surface is `crates/noscat-ffi` in the noscat workspace.** It was moved
+   out of this repo so it evolves in lockstep with the protocol and ships as the
+   published `noscat-ffi` crate. Until the app consumes the published crate, the
+   transitional bridge in `rust/` must stay surface-identical to it: every change
+   to the FFI lands in `crates/noscat-ffi` first, then mirrors here. Once the app
+   pins the published `noscat-ffi`, `rust/` is retired.
 2. **Kotlin sees only safe surfaces:** identities (npub strings), plain commands
    (`forward`, `expose`, `sendFile`, `receiveFile`), and the `EventListener` callback.
    Never leak ports-as-socket-addrs, hex keys beyond what the UI shows, or relay URLs
@@ -39,10 +44,10 @@ layer stays native Kotlin instead of a cross-platform framework.
 
 ## Layout
 
-- `rust/` - the UniFFI bridge crate (`noscat-android`). The FFI surface is
-  `rust/src/lib.rs`: records (`Identity`, `ClientConfig`), the `Event` enum, the
-  `EventListener` callback interface, `NoscatClient` with blocking methods that
-  dispatch results as events.
+- `rust/` - the transitional UniFFI bridge crate (`noscat-android`), kept only
+  until the app consumes the published `noscat-ffi` crate from the noscat
+  workspace (see rule 2). The canonical FFI surface lives there; keep this one
+  surface-identical.
 - `rust/bindings/` - generated Kotlin (git-ignored, regenerated at build time).
 - `app/` - the Android app. `MainActivity.kt` is currently a smoke-test surface
   (identity generation + event log), not the real UI.
@@ -106,12 +111,15 @@ UniFFI gotchas already paid for; do not regress:
 
 ## Upgrading noscat
 
-`rust/Cargo.toml` pins `noscat-core` and `noscat-client` by version. To pick up a new
-release, bump both versions there, run the container test, and check whether the
-`Event` enum in `noscat-client` grew variants; the pump thread in `lib.rs` matches
-exhaustively and will fail to compile, which is the intended forcing function. Note
-the crates.io token in the noscat repo only allowlists specific crate names; a new
-crate name (not planned) would need an allowlist update.
+The canonical FFI crate is `crates/noscat-ffi` in the noscat workspace; it is
+published to crates.io as `noscat-ffi` and version-locked to the whole workspace
+(one version bump per release, all crates together). While this repo still builds
+its own `rust/` bridge, any FFI change must land in `crates/noscat-ffi` first and
+be mirrored here verbatim. When the next noscat release lands, flip the app to the
+published `noscat-ffi` (regenerate the bindings from its `.so`, delete `rust/`,
+drop the `rust` steps from `scripts/build-native.sh`). Note the crates.io token in
+the noscat repo only allowlists specific crate names; a new crate name would need
+an allowlist update.
 
 ## Runtime behavior the app must handle (phase 1)
 
