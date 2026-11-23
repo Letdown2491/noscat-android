@@ -50,6 +50,11 @@ object ClientHolder {
     var roster: List<TailnetMember>? by mutableStateOf(null)
         private set
 
+    /** Refresh the cached roster (called after a successful member fetch). */
+    fun cacheRoster(list: List<TailnetMember>) {
+        roster = list
+    }
+
     /** Chat history per peer npub (in memory, oldest first). */
     val chats = HashMap<String, SnapshotStateList<ChatMsg>>()
 
@@ -150,7 +155,7 @@ object ClientHolder {
                 },
             )
             client = c
-            tailnetDir = tailnetDir
+            this.tailnetDir = tailnetDir
             logLine(
                 if (tailnetDir != null) "client started (tailnet joined)" else "client started",
             )

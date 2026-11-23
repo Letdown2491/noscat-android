@@ -3,15 +3,19 @@ package io.github.letdown2491.noscat
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +41,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -49,6 +54,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.runtime.Composable
@@ -56,6 +62,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.core.content.FileProvider
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -117,6 +124,9 @@ private fun Root(modifier: Modifier = Modifier) {
 
     if (tailnetDir != null) {
         var tab by remember { mutableStateOf("devices") }
+        // The conversation to open in the chat tab (device rows can jump
+        // straight into one). null = the chat device list.
+        var chatPeer by remember { mutableStateOf<String?>(null) }
         Scaffold(
             bottomBar = {
                 NavigationBar {
@@ -137,9 +147,18 @@ private fun Root(modifier: Modifier = Modifier) {
         ) { padding ->
             Box(Modifier.padding(padding)) {
                 when (tab) {
-                    "chat" -> ChatScreen(tailnetDir = tailnetDir!!)
+                    "chat" -> ChatScreen(
+                        tailnetDir = tailnetDir!!,
+                        openPeer = chatPeer,
+                        onOpenPeer = { chatPeer = it },
+                        onChatClosed = { chatPeer = null },
+                    )
                     else -> DevicesScreen(
                         tailnetDir = tailnetDir!!,
+                        onOpenChat = { npub ->
+                            chatPeer = npub
+                            tab = "chat"
+                        },
                         onDisconnect = {
                             AppPrefs.setTailnetDir(context, null)
                             scope.launch {
@@ -375,7 +394,11 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
 /** The tailnet home: devices, transfers, inbox. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
+private fun DevicesScreen(
+    tailnetDir: String,
+    onOpenChat: (String) -> Unit,
+    onDisconnect: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -426,7 +449,7 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
                 val visible = others(list)
                 members.value = visible
                 selectedNpub = visible.firstOrNull()?.npub
-                ClientHolder.roster = visible
+                ClientHolder.cacheRoster(visible)
             },
             { ClientHolder.logLine("cannot read tailnet: ${it.message}") },
         )
@@ -493,6 +516,11 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
                     member = m,
                     selected = selectedNpub == m.npub,
                     onSelect = { selectedNpub = m.npub },
+                    onSend = {
+                        selectedNpub = m.npub
+                        filePicker.launch(arrayOf("*/*"))
+                    },
+                    onChat = { onOpenChat(m.npub) },
                 )
             }
         }
@@ -530,13 +558,6 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
         }
 
         // Actions
-        val selected = findMember(members.value, selectedNpub)
-        val selectedLabel = selected?.let(::memberLabel) ?: short(selectedNpub)
-        Text("Send to $selectedLabel", style = MaterialTheme.typography.titleMedium)
-        Button(
-            onClick = { filePicker.launch(arrayOf("*/*")) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Send a file") }
         OutlinedButton(
             onClick = { showForward = true },
             modifier = Modifier.fillMaxWidth(),
@@ -545,7 +566,7 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
         // Inbox: inbound files land here on their own (node mode).
         Text("Inbox", style = MaterialTheme.typography.titleMedium)
         Text(
-            "files sent to this phone land here automatically",
+            "files sent to this phone land here automatically - tap one to open it",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -566,6 +587,7 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
                             MaterialTheme.colorScheme.surfaceContainerLow,
                             RoundedCornerShape(8.dp),
                         )
+                        .clickable { openInboxFile(context, f) }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
                     Text(
@@ -676,7 +698,13 @@ private fun ConnectionChip(connected: Boolean) {
 /** One tailnet device: address, owner badge, selection. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DeviceCard(member: TailnetMember, selected: Boolean, onSelect: () -> Unit) {
+private fun DeviceCard(
+    member: TailnetMember,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onSend: () -> Unit,
+    onChat: () -> Unit,
+) {
     Card(
         onClick = onSelect,
         colors = CardDefaults.cardColors(
@@ -702,6 +730,22 @@ private fun DeviceCard(member: TailnetMember, selected: Boolean, onSelect: () ->
                     member.npub.let { "${it.take(12)}...${it.takeLast(6)}" },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // Row-level actions: send a file to (and implicitly select) this
+            // device, or jump into its chat. No "Send to ..." section needed.
+            IconButton(onClick = onChat) {
+                Icon(
+                    Icons.Filled.Chat,
+                    contentDescription = "Chat with ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onSend) {
+                Icon(
+                    Icons.Filled.AttachFile,
+                    contentDescription = "Send a file to ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -762,11 +806,17 @@ private fun ForwardDialog(target: String, onDismiss: () -> Unit) {
 
 /** Chat: pick a device to talk to, then a one-message-at-a-time thread. */
 @Composable
-private fun ChatScreen(tailnetDir: String) {
+private fun ChatScreen(
+    tailnetDir: String,
+    openPeer: String?,
+    onOpenPeer: (String) -> Unit,
+    onChatClosed: () -> Unit,
+) {
     val myNpub = ClientHolder.client?.let { it.npub() }
-    var chatting by remember { mutableStateOf<String?>(null) }
 
-    val members = remember { mutableStateOf<List<TailnetMember>?>(null) }
+    // Seed from the cached roster so switching tabs renders instantly; the
+    // fetch below refreshes names.
+    val members = remember { mutableStateOf(ClientHolder.roster) }
     LaunchedEffect(tailnetDir) {
         val res = withContext(Dispatchers.IO) {
             runCatching { tailnetMembers(tailnetDir) }
@@ -777,7 +827,7 @@ private fun ChatScreen(tailnetDir: String) {
         )
     }
 
-    val peer = chatting
+    val peer = openPeer
     if (peer == null) {
         Column(
             Modifier
@@ -801,7 +851,7 @@ private fun ChatScreen(tailnetDir: String) {
                 )
                 else -> list.forEach { m ->
                     Card(
-                        onClick = { chatting = m.npub },
+                        onClick = { onOpenPeer(m.npub) },
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                         ),
@@ -832,7 +882,7 @@ private fun ChatScreen(tailnetDir: String) {
         peer = peer,
         peerLabel = members.value?.firstOrNull { it.npub == peer }?.let(::memberLabel)
             ?: short(peer),
-        onBack = { chatting = null },
+        onBack = onChatClosed,
     )
 }
 
@@ -975,6 +1025,40 @@ private fun formatSize(bytes: Long): String = when {
 private fun inboxFiles(context: Context): List<File> {
     val dir = context.getExternalFilesDir(null) ?: context.filesDir
     return dir.listFiles()?.sortedByDescending { it.lastModified() } ?: emptyList()
+}
+
+/** Guess a MIME type from a file's extension ("" when unknown). */
+private fun mimeFor(name: String): String {
+    val ext = name.substringAfterLast('.', "").lowercase()
+    return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: ""
+}
+
+/**
+ * Open a received inbox file in whatever app handles its type.
+ *
+ * The inbox (Android/data) is invisible to file managers on modern Android,
+ * so "open the file manager at that path" is not portable. The portable
+ * path is a FileProvider content URI plus ACTION_VIEW: every device
+ * resolves it to an installed viewer for the type (image, PDF, audio, a
+ * text editor...), falling back to a chooser and then to a plain message
+ * when nothing installed can open it.
+ */
+private fun openInboxFile(context: Context, file: File) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, mimeFor(file.name).ifEmpty { "*/*" })
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        // No default handler for the type: let the user pick one.
+        try {
+            context.startActivity(Intent.createChooser(intent, file.name))
+        } catch (_: ActivityNotFoundException) {
+            toast(context, "no app can open this file type")
+        }
+    }
 }
 
 /**

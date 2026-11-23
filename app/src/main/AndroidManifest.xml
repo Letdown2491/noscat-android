@@ -25,6 +25,20 @@
             android:name=".NoscatService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Lets the inbox hand received files to viewers (open-in apps):
+             the inbox lives in Android/data, invisible to file managers on
+             modern Android, so a content URI + ACTION_VIEW is the only
+             portable way to open a received file. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="io.github.letdown2491.noscat.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paths FileProvider may share: the app's inbox (its external files
+     directory, where received files land). -->
+<paths>
+    <external-files-path name="inbox" path="." />
+</paths>
