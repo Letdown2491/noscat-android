@@ -7,7 +7,7 @@
 # mounted into the container because the host has no Rust toolchain.
 #
 # Usage:
-#   scripts/build-native.sh [version]   # build the published crate; default 0.2.0
+#   scripts/build-native.sh [version]   # build the published crate; default 0.3.0
 #   scripts/build-native.sh local       # build from a noscat checkout
 #                                       # (NOSCAT_DIR overrides, default ~/Documents/noscat)
 set -eu
@@ -48,7 +48,7 @@ if [ "${1:-}" = "local" ]; then
   exit 0
 fi
 
-NFFI_VERSION="${1:-0.2.0}"
+NFFI_VERSION="${1:-0.3.0}"
 
 podman run --rm \
   $(eval echo $COMMON_ENV) \
