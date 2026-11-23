@@ -228,14 +228,9 @@ private fun Root(modifier: Modifier = Modifier) {
 @Composable
 private fun JoinScreen(onJoined: (String) -> Unit) {
     val context = LocalContext.current
-    // The device dir, renamed from "tailnet" with the tailnet->mesh rename:
-    // migrate existing installs by moving the old directory once.
-    val dir = remember {
-        val new = File(context.filesDir, "mesh")
-        val old = File(context.filesDir, "tailnet")
-        if (old.exists() && !new.exists()) old.renameTo(new)
-        new
-    }
+    // ClientHolder.startFromPrefs owns the pre-rename directory migration;
+    // a device that is not joined has no legacy dir, so just use the name.
+    val dir = remember { File(context.filesDir, "mesh") }
 
     var ownerNpub by remember { mutableStateOf<String?>(null) }
     var ownerField by remember { mutableStateOf("") }
