@@ -532,7 +532,13 @@ private fun DevicesScreen(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Devices", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = { syncDevices(5uL) }, enabled = !syncing) {
+            // 32dp box: the default 48dp IconButton height is what pushed
+            // this title lower than the headers on the other tabs.
+            IconButton(
+                onClick = { syncDevices(5uL) },
+                enabled = !syncing,
+                modifier = Modifier.size(32.dp),
+            ) {
                 if (syncing) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
