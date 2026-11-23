@@ -59,6 +59,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lan
@@ -553,16 +555,30 @@ private fun DevicesScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            else -> list.forEach { m ->
-                DeviceCard(
-                    member = m,
-                    onSend = {
-                        sendTarget = m.npub
-                        filePicker.launch(arrayOf("*/*"))
-                    },
-                    onChat = { onOpenChat(m.npub) },
-                    onForward = { forwardTarget = m.npub },
-                )
+            else -> {
+                list.forEach { m ->
+                    DeviceCard(
+                        member = m,
+                        onSend = {
+                            sendTarget = m.npub
+                            filePicker.launch(arrayOf("*/*"))
+                        },
+                        onChat = { onOpenChat(m.npub) },
+                        onForward = { forwardTarget = m.npub },
+                    )
+                }
+                // This device, too: your npub is copyable from the same
+                // list your peers' npubs live in.
+                val selfNpub = ClientHolder.client?.let {
+                    runCatching { it.npub() }.getOrNull()
+                }
+                if (selfNpub != null) {
+                    SelfCard(
+                        name = AppPrefs.deviceName(context)?.takeIf { it.isNotBlank() }
+                            ?: android.os.Build.MODEL,
+                        npub = selfNpub,
+                    )
+                }
             }
         }
     }
@@ -734,14 +750,9 @@ private fun SettingsScreen(onDisconnect: () -> Unit) {
             )
         }
 
-        // Connection: the one-line status a support question starts with.
-        val npub = ClientHolder.client?.let { runCatching { it.npub() }.getOrNull() }
-        val status = when {
-            npub == null -> "not running"
-            ClientHolder.meshDir != null -> "connected as ${short(npub)} (mesh)"
-            else -> "connected as ${short(npub)}"
-        }
-        Text(status, style = MaterialTheme.typography.bodyMedium)
+        // Connection state lives on the chip above; the npub is copyable
+        // from this device's row on the Devices tab.
+        Spacer(Modifier.height(4.dp))
 
         // Device name.
         Text("Device name", style = MaterialTheme.typography.titleMedium)
@@ -884,6 +895,87 @@ private fun DeviceCard(
     onChat: () -> Unit,
     onForward: () -> Unit,
 ) {
+    val context = LocalContext.current
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            // Row 1: the device's identity.
+            Text(
+                memberLabel(member),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+            // Row 2: everything a peer is for, one tap away: chat, share
+            // this phone's clipboard, send a file, forward one of this
+            // device's services, copy the npub (no more truncated lines).
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onChat) {
+                    Icon(
+                        Icons.Filled.Chat,
+                        contentDescription = "Chat with ${memberLabel(member)}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    val text = cm.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+                    if (text.isNullOrEmpty()) {
+                        toast(context, "clipboard is empty")
+                    } else {
+                        ClientHolder.sendClipboard(member.npub, text)
+                        toast(context, "clipboard sent to ${memberLabel(member)}")
+                    }
+                }) {
+                    Icon(
+                        Icons.Filled.ContentPaste,
+                        contentDescription = "Paste this phone's clipboard to ${memberLabel(member)}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onSend) {
+                    Icon(
+                        Icons.Filled.AttachFile,
+                        contentDescription = "Send a file to ${memberLabel(member)}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onForward) {
+                    Icon(
+                        Icons.Filled.Lan,
+                        contentDescription = "Forward a service of ${memberLabel(member)}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    cm.setPrimaryClip(
+                        ClipData.newPlainText("npub", member.npub),
+                    )
+                    toast(context, "npub copied")
+                }) {
+                    Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = "Copy the npub of ${memberLabel(member)}",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** This device, on the list too: copy your own npub from the same place
+ * your peers' npubs live. No actions beyond that - it is you. */
+@Composable
+private fun SelfCard(name: String, npub: String) {
+    val context = LocalContext.current
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -892,40 +984,25 @@ private fun DeviceCard(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Column(Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.titleSmall)
                 Text(
-                    memberLabel(member),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Text(
-                    member.npub.let { "${it.take(12)}...${it.takeLast(6)}" },
+                    "this device",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            // Row-level actions: chat, send a file (implicitly selects this
-            // device), forward one of this device's services to a local
-            // port. Everything a peer is for, one tap away.
-            IconButton(onClick = onChat) {
+            IconButton(onClick = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("npub", npub))
+                toast(context, "npub copied")
+            }) {
                 Icon(
-                    Icons.Filled.Chat,
-                    contentDescription = "Chat with ${memberLabel(member)}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onSend) {
-                Icon(
-                    Icons.Filled.AttachFile,
-                    contentDescription = "Send a file to ${memberLabel(member)}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onForward) {
-                Icon(
-                    Icons.Filled.Lan,
-                    contentDescription = "Forward a service of ${memberLabel(member)}",
+                    Icons.Filled.ContentCopy,
+                    contentDescription = "Copy this device's npub",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

@@ -234,6 +234,12 @@ object ClientHolder {
                 chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
                 unread[event.peer] = (unread[event.peer] ?: 0) + 1
             }
+            is Event.Clipboard -> {
+                // A peer shared their clipboard: it becomes ours. This is
+                // the receiving end of the row "paste" action.
+                setClipboardText(event.text)
+                logLine("clipboard updated by ${event.peer.take(16)}... (${event.text.length} chars)")
+            }
             is Event.ChatFailed -> {
                 // Mark the newest undelivered optimistic bubble.
                 val msgs = chats[event.peer] ?: return
@@ -284,8 +290,32 @@ object ClientHolder {
         }
     }
 
-    /** Sends a chat message; the optimistic bubble marks itself on failure. */
-    fun sendChat(peer: String, text: String) {
+    /** Share this device's clipboard text with a peer: it becomes the
+     * clipboard on the receiving device. Fire and forget; a failure lands
+     * in the event log (the text is still on our clipboard either way). */
+    fun sendClipboard(peer: String, text: String) {
+        val c = client ?: run { logLine("clipboard send aborted: client is not running"); return }
+        Thread {
+            try {
+                // Returns once the peer echoed the delivery FIN.
+                c.sendClipboard(peer, text)
+                logLine("clipboard sent to ${peer.take(16)}... (${text.length} chars)")
+            } catch (t: Throwable) {
+                logLine("clipboard send failed: $t")
+            }
+        }.start()
+    }
+
+    /** Put text on the Android system clipboard (main-thread API). */
+    private fun setClipboardText(text: String) {
+        val ctx = appContext ?: return
+        main.post {
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("noscat", text))
+        }
+    }
+
+    /** Sends a chat message; the optimistic bubble marks itself on failure. */    fun sendChat(peer: String, text: String) {
         val c = client ?: run { logLine("chat aborted: client is not running"); return }
         chatWith(peer).add(ChatMsg(text, outgoing = true))
         Thread {
@@ -343,6 +373,7 @@ object ClientHolder {
         is Event.TransferFailed -> "transfer failed: ${event.peer}: ${event.error}"
         is Event.ChatMessage -> "message from ${event.peer}: ${event.text}"
         is Event.ChatFailed -> "message not delivered: ${event.peer}: ${event.error}"
+        is Event.Clipboard -> "clipboard shared by ${event.peer} (${event.text.length} chars)"
         is Event.Stopped -> "stopped: ${event.what}" +
             (event.error?.let { " ($it)" } ?: "")
     }
