@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ClientHolder.init(this)
+        NoscatService.start(this)
         setContent { NoscatApp() }
     }
 
@@ -90,23 +91,13 @@ private fun Root(modifier: Modifier = Modifier) {
     var screenReady by remember { mutableStateOf(false) }
     var started by remember { mutableStateOf(false) }
 
-    // One-time startup: after joining, the phone's mesh identity is its
-    // tailnet device identity (the one the owner invited); before that it is
-    // the standalone app identity.
+    // One-time startup: the foreground service owns the client's lifetime,
+    // but start it here too so the UI is usable immediately (idempotent).
     LaunchedEffect(Unit) {
         if (screenReady) return@LaunchedEffect
         runCatching {
-            val dir = AppPrefs.tailnetDir(context)
-            val secret = withContext(Dispatchers.IO) {
-                when {
-                    dir != null -> File(dir, "identity.nsec").readText().trim()
-                    else -> IdentityStore.load(context) ?: generateIdentity().secretHex.also {
-                        IdentityStore.save(context, it)
-                    }
-                }
-            }
-            withContext(Dispatchers.IO) { ClientHolder.getOrStart(secret, dir) }
-            tailnetDir = dir
+            withContext(Dispatchers.IO) { ClientHolder.startFromPrefs(context) }
+            tailnetDir = AppPrefs.tailnetDir(context)
         }.onFailure { ClientHolder.logLine("startup failed: $it") }
         started = true
         screenReady = true

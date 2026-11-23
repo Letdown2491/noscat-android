@@ -7,6 +7,8 @@ import android.widget.Toast
 import uniffi.noscat.Event
 import uniffi.noscat.EventListener
 import uniffi.noscat.NoscatClient
+import uniffi.noscat.generateIdentity
+import java.io.File
 
 /**
  * Holds the running client across activity recreations and renders events to
@@ -25,6 +27,23 @@ object ClientHolder {
     /** Call once from the activity so transfer outcomes can toast. */
     fun init(context: Context) {
         appContext = context.applicationContext
+    }
+
+    /**
+     * Computes the identity and tailnet state from prefs and starts (or
+     * returns) the client. Blocking FFI work: run it off the main thread.
+     * After joining a tailnet, the phone's mesh identity is its tailnet
+     * device identity; before that it is the standalone app identity.
+     */
+    fun startFromPrefs(context: Context): NoscatClient? {
+        val dir = AppPrefs.tailnetDir(context)
+        val secret = when {
+            dir != null -> File(dir, "identity.nsec").readText().trim()
+            else -> IdentityStore.load(context) ?: generateIdentity().secretHex.also {
+                IdentityStore.save(context, it)
+            }
+        }
+        return getOrStart(secret, dir)
     }
 
     fun logLine(line: String) {
