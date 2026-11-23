@@ -912,29 +912,17 @@ private fun DeviceCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            // The name is the npub copy affordance: tap it (or the little
-            // copy glyph beside it) and the full npub is on the clipboard.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            // The name is the npub copy affordance: tap it and the full
+            // npub is on the clipboard.
+            Text(
+                memberLabel(member),
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .weight(1f)
                     .clickable(onClick = copyNpub),
-            ) {
-                Text(
-                    memberLabel(member),
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Icon(
-                    Icons.Filled.ContentCopy,
-                    contentDescription = "Copy the npub of ${memberLabel(member)}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .padding(start = 4.dp)
-                        .size(14.dp),
-                )
-            }
+            )
             // Row-level actions: chat, share this phone's clipboard, send
             // a file, forward one of this device's services.
             IconButton(onClick = onChat) {
@@ -994,26 +982,30 @@ private fun SelfCard(name: String, npub: String) {
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(name, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "this device",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = {
-                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                    as android.content.ClipboardManager
-                cm.setPrimaryClip(ClipData.newPlainText("npub", npub))
-                toast(context, "npub copied")
-            }) {
-                Icon(
-                    Icons.Filled.ContentCopy,
-                    contentDescription = "Copy this device's npub",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                name,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                            as android.content.ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("npub", npub))
+                        toast(context, "npub copied")
+                    },
+            )
+            // A "You" badge, not actions: this row is you.
+            Text(
+                "You",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier
+                    .background(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        CircleShape,
+                    )
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
         }
     }
 }
