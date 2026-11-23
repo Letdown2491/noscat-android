@@ -1007,6 +1007,10 @@ private fun SelfCard(name: String, npub: String) {
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
+            // You are online exactly when the node is: the app is running,
+            // listening, and advertising.
+            PresenceDot(live = ClientHolder.client != null)
+            Spacer(Modifier.width(6.dp))
             Text(
                 name,
                 style = MaterialTheme.typography.titleSmall,
