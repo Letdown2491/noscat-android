@@ -530,13 +530,10 @@ private fun DevicesScreen(
     val myNpub = ClientHolder.myNpub
     fun others(list: List<MeshMember>) = list.filter { it.npub != myNpub }
 
-    /** Sync the roster from the relays. With `auto`, skipped when the last
-     * sync is fresh: devices update themselves on every visit to this tab,
-     * without hammering the relays on each tab flip. */
-    fun syncDevices(waitSecs: ULong, auto: Boolean = false) {
-        if (auto && System.currentTimeMillis() - ClientHolder.lastRosterSync <
-            AUTO_SYNC_INTERVAL_MS
-        ) return
+    /** Sync the roster from the relays: pull to refresh and the freshness
+     * timer below are the only callers. Tab switches never hit the
+     * network; the list renders from the persisted roster. */
+    fun syncDevices(waitSecs: ULong) {
         scope.launch {
             syncing = true
             val res = withContext(Dispatchers.IO) {
@@ -552,7 +549,6 @@ private fun DevicesScreen(
             syncing = false
             res.fold(
                 { list ->
-                    ClientHolder.lastRosterSync = System.currentTimeMillis()
                     val visible = others(list)
                     members.value = visible
                     ClientHolder.cacheRoster(visible)
@@ -562,16 +558,16 @@ private fun DevicesScreen(
         }
     }
 
+    // Freshness while this tab is on screen: the list refreshes itself on
+    // a timer, so tab switches cost nothing. The first sync fires when
+    // the node comes up (below), not on entering the tab; a sync before
+    // the relays are connected would see nothing anyway.
     LaunchedEffect(meshDir) {
-        // Devices update themselves: opening the tab syncs (throttled), so
-        // joins, renames, and presence arrive without any button. The list
-        // meanwhile renders from the persisted roster - the FFI's member
-        // fetch would add a relay round-trip per device.
-        syncDevices(5uL, auto = true)
+        while (true) {
+            delay(ROSTER_SYNC_PERIOD_MS)
+            syncDevices(5uL)
+        }
     }
-    // The sync above can run before the node has finished connecting to
-    // the relays (it can take tens of seconds) and so see nothing. Once
-    // the node is up, sync again for real - this one skips the throttle.
     LaunchedEffect(ClientHolder.nodeUp) {
         if (ClientHolder.nodeUp) syncDevices(5uL)
     }
@@ -1113,9 +1109,10 @@ private fun DeviceCard(
  * on this timer, so an advert younger than the TTL means the peer is up. */
 private const val ADVERT_TTL_SECS: ULong = 3600uL
 
-/** How often the Devices tab may sync itself on open, so tab flipping
- * does not hammer the relays. Pull to refresh always syncs. */
-private const val AUTO_SYNC_INTERVAL_MS = 60_000L
+/** How often the Devices tab refreshes itself while it is on screen.
+ * Tab switches never sync; nothing else needs this cadence either, the
+ * presence dot's advert TTL is an hour. */
+private const val ROSTER_SYNC_PERIOD_MS = 120_000L
 
 /** Online per the mesh presence: the peer's advert is fresh. */
 private fun MeshMember.online(): Boolean =

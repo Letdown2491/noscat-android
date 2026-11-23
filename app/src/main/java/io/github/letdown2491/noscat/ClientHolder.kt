@@ -55,7 +55,7 @@ object ClientHolder {
      * Last known mesh roster, cached across navigation AND restarts: the
      * device list renders from disk at startup. The FFI's member fetch
      * does a relay advert round-trip per device, so the list must never
-     * wait on it; the (throttled) sync updates the cache in place.
+     * wait on it; the background sync updates the cache in place.
      */
     var roster: List<MeshMember>? by mutableStateOf(null)
         private set
@@ -108,10 +108,6 @@ object ClientHolder {
      * reads better than a flicker. */
     val liveTunnels = mutableStateMapOf<String, Boolean>()
     private val pendingClose = HashMap<String, Runnable>()
-
-    /** When the roster last synced from the relays (epoch ms). The
-     * Devices tab throttles its automatic sync against this. */
-    var lastRosterSync = 0L
 
     /** True once the node is listening on the relays. Until this flips,
      * relay-backed work (advert lookups, roster sync) returns nothing:
@@ -459,7 +455,6 @@ object ClientHolder {
         client = null
         myNpub = null
         nodeUp = false
-        lastRosterSync = 0L
         roster = null
         // A stale persisted roster would show mesh peers while standalone.
         runCatching { rosterFile.delete() }
