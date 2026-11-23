@@ -110,24 +110,57 @@ private fun Root(modifier: Modifier = Modifier) {
     if (!screenReady) return
 
     if (tailnetDir != null) {
-        DevicesScreen(
-            tailnetDir = tailnetDir!!,
-            onDisconnect = {
-                AppPrefs.setTailnetDir(context, null)
-                scope.launch {
-                    val secret = withContext(Dispatchers.IO) {
-                        IdentityStore.load(context) ?: generateIdentity().secretHex.also {
-                            IdentityStore.save(context, it)
+        var tab by remember { mutableStateOf("devices") }
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+            ) {
+                TabButton("Devices", tab == "devices") { tab = "devices" }
+                Spacer(Modifier.width(12.dp))
+                TabButton("Chat", tab == "chat") { tab = "chat" }
+            }
+            when (tab) {
+                "chat" -> ChatScreen(tailnetDir = tailnetDir!!)
+                else -> DevicesScreen(
+                    tailnetDir = tailnetDir!!,
+                    onOpenChat = { tab = "chat" },
+                    onDisconnect = {
+                        AppPrefs.setTailnetDir(context, null)
+                        scope.launch {
+                            val secret = withContext(Dispatchers.IO) {
+                                IdentityStore.load(context) ?: generateIdentity().secretHex.also {
+                                    IdentityStore.save(context, it)
+                                }
+                            }
+                            withContext(Dispatchers.IO) { ClientHolder.restart(secret, null) }
+                            tailnetDir = null
                         }
-                    }
-                    withContext(Dispatchers.IO) { ClientHolder.restart(secret, null) }
-                    tailnetDir = null
-                }
-            },
-        )
+                    },
+                )
+            }
+        }
     } else {
         JoinScreen(
             onJoined = { dir -> tailnetDir = dir },
+        )
+    }
+}
+
+/** Header tab: plain text, bold when active. */
+@Composable
+private fun TabButton(label: String, active: Boolean, onClick: () -> Unit) {
+    TextButton(onClick = onClick) {
+        Text(
+            label,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (active) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
         )
     }
 }
@@ -344,7 +377,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
 /** The tailnet home: devices, transfers, inbox. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
+private fun DevicesScreen(tailnetDir: String, onOpenChat: () -> Unit, onDisconnect: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -354,7 +387,6 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
     var showForward by remember { mutableStateOf(false) }
     var showDiagnostics by remember { mutableStateOf(false) }
     var confirmDisconnect by remember { mutableStateOf(false) }
-    var receiving by remember { mutableStateOf(false) }
 
     val transfer = ClientHolder.transfer
     val inboxVersion = ClientHolder.inboxVersion
@@ -505,26 +537,18 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
             onClick = { showForward = true },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Forward a service") }
+        OutlinedButton(
+            onClick = onOpenChat,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Chat") }
 
-        // Inbox
+        // Inbox: inbound files land here on their own (node mode).
         Text("Inbox", style = MaterialTheme.typography.titleMedium)
-        if (receiving) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Waiting for an incoming file", style = MaterialTheme.typography.titleSmall)
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-            }
-        } else {
-            OutlinedButton(
-                onClick = {
-                    receiving = true
-                    val out = (context.getExternalFilesDir(null) ?: context.filesDir).absolutePath
-                    ClientHolder.receiveFile(out)
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Receive a file") }
-        }
+        Text(
+            "files sent to this phone land here automatically",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         val files = inbox.value
         if (files.isEmpty()) {
             Text(
@@ -732,6 +756,193 @@ private fun ForwardDialog(target: String, onDismiss: () -> Unit) {
             OutlinedButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
+}
+
+// ----------------------------------------------------------------- chat
+
+/** Chat: pick a device to talk to, then a one-message-at-a-time thread. */
+@Composable
+private fun ChatScreen(tailnetDir: String) {
+    val myNpub = ClientHolder.client?.let { it.npub() }
+    var chatting by remember { mutableStateOf<String?>(null) }
+
+    val members = remember { mutableStateOf<List<TailnetMember>?>(null) }
+    LaunchedEffect(tailnetDir) {
+        val res = withContext(Dispatchers.IO) {
+            runCatching { tailnetMembers(tailnetDir) }
+        }
+        res.fold(
+            { list -> members.value = list.filter { it.npub != myNpub } },
+            { ClientHolder.logLine("cannot read tailnet: ${it.message}") },
+        )
+    }
+
+    val peer = chatting
+    if (peer == null) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Chat", style = MaterialTheme.typography.titleLarge)
+            val list = members.value
+            when {
+                list == null -> Text(
+                    "loading devices...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                list.isEmpty() -> Text(
+                    "no other devices in this tailnet yet",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> list.forEach { m ->
+                    Card(
+                        onClick = { chatting = m.npub },
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                if (m.isOwner) "Owner device" else "Device",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                ClientHolder.chatWith(m.npub).lastOrNull()?.text
+                                    ?: "no messages yet",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    ConversationScreen(peer = peer, onBack = { chatting = null })
+}
+
+/** The thread with one device: bubbles plus a send box. */
+@Composable
+private fun ConversationScreen(peer: String, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var draft by remember { mutableStateOf("") }
+    val msgs = ClientHolder.chatWith(peer)
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+        ) {
+            TextButton(onClick = onBack) { Text("< Back") }
+            Column {
+                Text("Chat", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    peer.let { "${it.take(12)}...${it.takeLast(6)}" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        HorizontalDivider()
+
+        if (msgs.isEmpty()) {
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.weight(1f))
+                Text("no messages yet", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "say hi - messages go device to device, encrypted, peer to peer",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+            }
+        } else {
+            // reverseLayout pins the newest message at the bottom.
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    horizontal = 16.dp,
+                    vertical = 8.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                reverseLayout = true,
+            ) {
+                items(msgs.size, key = { msgs[msgs.size - 1 - it].at }) { i ->
+                    val m = msgs[msgs.size - 1 - i]
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = if (m.outgoing) {
+                            Arrangement.End
+                        } else {
+                            Arrangement.Start
+                        },
+                    ) {
+                        Surface(
+                            color = when {
+                                m.failed -> MaterialTheme.colorScheme.errorContainer
+                                m.outgoing -> MaterialTheme.colorScheme.primaryContainer
+                                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                        ) {
+                            Text(
+                                if (m.failed) "${m.text}  (not delivered)" else m.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider()
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+        ) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text("Message") },
+                modifier = Modifier.weight(1f),
+                maxLines = 4,
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    val text = draft.trim()
+                    if (text.isNotEmpty()) {
+                        draft = ""
+                        ClientHolder.sendChat(peer, text)
+                    }
+                },
+            ) { Text("Send") }
+        }
+    }
 }
 
 // ------------------------------------------------------------- helpers

@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import uniffi.noscat.Event
 import uniffi.noscat.EventListener
 import uniffi.noscat.NoscatClient
@@ -36,6 +37,9 @@ object ClientHolder {
     var inboxVersion by mutableStateOf(0)
         private set
 
+    /** Chat history per peer npub (in memory, oldest first). */
+    val chats = HashMap<String, SnapshotStateList<ChatMsg>>()
+
     private val main = Handler(Looper.getMainLooper())
     private var appContext: Context? = null
 
@@ -50,6 +54,14 @@ object ClientHolder {
         val percent: Int
             get() = if (total <= 0) 0 else ((sent * 100 / total).coerceAtMost(100)).toInt()
     }
+
+    /** One chat bubble. Outgoing messages are optimistic; failure marks them. */
+    data class ChatMsg(
+        val text: String,
+        val outgoing: Boolean,
+        val failed: Boolean = false,
+        val at: Long = System.currentTimeMillis(),
+    )
 
     /** Call once from the activity so transfer outcomes can toast. */
     fun init(context: Context) {
@@ -87,7 +99,9 @@ object ClientHolder {
      * Starts (or returns) the running client. Blocking FFI call, so run it off
      * the main thread. Returns null and logs when the native side fails.
      * `tailnetDir` scopes tunnels to a tailnet group (PSK auth) - pass the
-     * joined device directory, or null for bare (non-tailnet) tunnels.
+     * joined device directory, or null for bare (non-tailnet) tunnels. With a
+     * tailnet, the client also runs node mode: inbound files land in the app
+     * inbox on their own, and chat messages arrive as events - no arming.
      */
     @Synchronized
     fun getOrStart(secretHex: String?, tailnetDir: String? = null): NoscatClient? {
@@ -104,9 +118,13 @@ object ClientHolder {
                     override fun onEvent(event: Event) {
                         logLine(render(event))
                         onEventState(event)
-                        // Transfers complete out of band; surface the outcome
-                        // as a toast so it is visible without scrolling.
-                        if (event is Event.TransferDone || event is Event.TransferFailed) {
+                        // Transfers and chats complete out of band; surface
+                        // the outcome as a toast so it needs no scrolling.
+                        if (
+                            event is Event.TransferDone ||
+                            event is Event.TransferFailed ||
+                            event is Event.ChatMessage
+                        ) {
                             val text = render(event)
                             main.post {
                                 Toast.makeText(appContext, text, Toast.LENGTH_LONG).show()
@@ -119,6 +137,19 @@ object ClientHolder {
             logLine(
                 if (tailnetDir != null) "client started (tailnet joined)" else "client started",
             )
+            if (tailnetDir != null) {
+                // Node mode: publish the advert and dispatch inbound streams
+                // (files -> inbox, chat -> events) until the client drops.
+                Thread {
+                    try {
+                        val out = outDir()
+                        c.up(out, null)
+                        logLine("node up: files arrive in the inbox automatically")
+                    } catch (t: Throwable) {
+                        logLine("node failed to start: $t")
+                    }
+                }.start()
+            }
             c
         } catch (t: Throwable) {
             logLine("client failed to start: $t")
@@ -126,7 +157,13 @@ object ClientHolder {
         }
     }
 
-    /** Keeps the transfer progress state in step with the event stream. */
+    /** The directory inbound files land in (the inbox). */
+    fun outDir(): String {
+        val ctx = appContext ?: error("ClientHolder.init not called")
+        return (ctx.getExternalFilesDir(null) ?: ctx.filesDir).absolutePath
+    }
+
+    /** Keeps the transfer progress and chat state in step with the events. */
     private fun onEventState(event: Event) {
         when (event) {
             is Event.TransferProgress -> transfer = TransferState(
@@ -141,9 +178,20 @@ object ClientHolder {
                 inboxVersion++
             }
             is Event.TransferFailed -> transfer = null
+            is Event.ChatMessage -> chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
+            is Event.ChatFailed -> {
+                // Mark the newest undelivered optimistic bubble.
+                val msgs = chats[event.peer] ?: return
+                val idx = msgs.indexOfLast { it.outgoing && !it.failed }
+                if (idx >= 0) msgs[idx] = msgs[idx].copy(failed = true)
+            }
             else -> {}
         }
     }
+
+    /** The (live) message list for a conversation, oldest first. */
+    fun chatWith(peer: String): SnapshotStateList<ChatMsg> =
+        chats.getOrPut(peer) { mutableStateListOf() }
 
     /** Sends a file, tracking progress. Errors land in the log, not the void. */
     fun sendFile(path: String, targetNpub: String) {
@@ -169,27 +217,22 @@ object ClientHolder {
         }
     }
 
-    /** Arms the receiver; the outcome arrives as a transfer event. */
-    fun receiveFile(outDir: String) {
-        val c = client ?: run { logLine("receive aborted: client is not running"); return }
-        transfer = TransferState(
-            name = "incoming file",
-            peer = "",
-            sent = 0,
-            total = 0,
-            incoming = true,
-        )
-        logLine("waiting for an incoming file")
-        main.post {
-            Thread {
-                try {
-                    c.receiveFile(outDir)
-                } catch (t: Throwable) {
-                    logLine("receive failed to start: $t")
-                    transfer = null
+    /** Sends a chat message; the optimistic bubble marks itself on failure. */
+    fun sendChat(peer: String, text: String) {
+        val c = client ?: run { logLine("chat aborted: client is not running"); return }
+        chatWith(peer).add(ChatMsg(text, outgoing = true))
+        Thread {
+            try {
+                c.sendChat(peer, text)
+            } catch (t: Throwable) {
+                logLine("chat failed to start: $t")
+                main.post {
+                    val msgs = chatWith(peer)
+                    val idx = msgs.indexOfLast { it.outgoing && !it.failed }
+                    if (idx >= 0) msgs[idx] = msgs[idx].copy(failed = true)
                 }
-            }.start()
-        }
+            }
+        }.start()
     }
 
     /**
@@ -212,6 +255,8 @@ object ClientHolder {
             "transfer ${event.sent * 100uL / maxOf(event.total, 1uL)}%: ${File(event.path).name}"
         is Event.TransferDone -> "transfer done: ${File(event.path).name} <- ${event.peer}"
         is Event.TransferFailed -> "transfer failed: ${event.peer}: ${event.error}"
+        is Event.ChatMessage -> "message from ${event.peer}: ${event.text}"
+        is Event.ChatFailed -> "message not delivered: ${event.peer}: ${event.error}"
         is Event.Stopped -> "stopped: ${event.what}" +
             (event.error?.let { " ($it)" } ?: "")
     }
