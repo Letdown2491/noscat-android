@@ -556,7 +556,7 @@ private fun DevicesScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             list.isEmpty() -> Text(
-                "no other devices in this mesh yet - have another device " +
+                "no other devices in this mesh yet. have another device " +
                     "scan this phone's QR code, or scan the owner's code to join",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -665,14 +665,10 @@ private fun FilesScreen(onDisconnect: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Text(
-            "files sent to this phone land here automatically - tap one to open it",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         if (files.isEmpty()) {
             Text(
-                "nothing received yet - files arrive here even when the app is closed",
+                "nothing received yet. files sent to this phone land here " +
+                    "even when the app is closed, and tapping one opens it",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -969,8 +965,22 @@ private fun DeviceCard(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Spacer(Modifier.width(6.dp))
+            PresenceDot(live = ClientHolder.liveTunnels[member.npub] == true)
         }
     }
+}
+
+/** Live-tunnel presence dot: green while a tunnel to that peer is up
+ * (the same signal the Files tab's transfer card shows, per device). */
+@Composable
+private fun PresenceDot(live: Boolean) {
+    if (!live) return
+    Box(
+        Modifier
+            .size(8.dp)
+            .background(Color(0xFF2E7D32), CircleShape),
+    )
 }
 
 /** This device, on the list too: copy your own npub from the same place
@@ -1117,7 +1127,7 @@ private fun ChatScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 list.isEmpty() -> Text(
-                    "no other devices in this mesh yet - once a device " +
+                    "no other devices in this mesh yet. once a device " +
                         "joins, chat with it here",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1148,17 +1158,25 @@ private fun ChatScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            if ((ClientHolder.unread[m.npub] ?: 0) > 0) {
-                                // Something arrived since the conversation
-                                // was last on screen.
-                                Box(
-                                    Modifier
-                                        .size(10.dp)
-                                        .background(
-                                            MaterialTheme.colorScheme.primary,
-                                            CircleShape,
-                                        ),
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                PresenceDot(
+                                    live = ClientHolder.liveTunnels[m.npub] == true,
                                 )
+                                if ((ClientHolder.unread[m.npub] ?: 0) > 0) {
+                                    // Something arrived since the conversation
+                                    // was last on screen.
+                                    Box(
+                                        Modifier
+                                            .size(10.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.primary,
+                                                CircleShape,
+                                            ),
+                                    )
+                                }
                             }
                         }
                     }

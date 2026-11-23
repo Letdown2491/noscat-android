@@ -62,6 +62,10 @@ object ClientHolder {
     /** Unread chat count per peer npub (Compose observable). */
     val unread = mutableStateMapOf<String, Int>()
 
+    /** Peers with a live tunnel right now (Compose observable). The
+     * presence dot on the device and chat rows reads this. */
+    val liveTunnels = mutableStateMapOf<String, Boolean>()
+
     /** Total unread chat messages, for the bottom-nav badge. */
     val unreadTotal: Int get() = unread.values.sum()
 
@@ -234,6 +238,8 @@ object ClientHolder {
                 chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
                 unread[event.peer] = (unread[event.peer] ?: 0) + 1
             }
+            is Event.TunnelUp -> liveTunnels[event.peer] = true
+            is Event.TunnelClosed -> liveTunnels[event.peer] = false
             is Event.Clipboard -> {
                 // A peer shared their clipboard: it becomes ours. This is
                 // the receiving end of the row "paste" action.
