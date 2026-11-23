@@ -201,11 +201,7 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
                     OutlinedButton(onClick = { showQr = true }) { Text("Show QR") }
                 }
                 Text(
-                    "on the owner device, run:",
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                Text(
-                    "noscat tailnet invite ${deviceNpub!!.take(20)}... --dir ./device-a",
+                    "Tap Join, then accept this phone on the owner device when it asks. It must be running 'noscat up --tailnet'.",
                     style = MaterialTheme.typography.bodySmall,
                 )
 
