@@ -6,6 +6,7 @@ import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
+import uniffi.noscat.TailnetMember
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -35,6 +36,18 @@ object ClientHolder {
 
     /** Increments whenever a received file lands, so the inbox re-lists. */
     var inboxVersion by mutableStateOf(0)
+        private set
+
+    /** The tailnet dir the running client is scoped to, or null (standalone). */
+    var tailnetDir: String? = null
+        private set
+
+    /**
+     * Last known tailnet roster, cached across navigation: the device list
+     * and the connection pill render instantly from this while a fresh
+     * fetch (advert names over relays) runs in the background.
+     */
+    var roster: List<TailnetMember>? by mutableStateOf(null)
         private set
 
     /** Chat history per peer npub (in memory, oldest first). */
@@ -137,6 +150,7 @@ object ClientHolder {
                 },
             )
             client = c
+            tailnetDir = tailnetDir
             logLine(
                 if (tailnetDir != null) "client started (tailnet joined)" else "client started",
             )
@@ -246,6 +260,7 @@ object ClientHolder {
     fun restart(secretHex: String?, tailnetDir: String?): NoscatClient? {
         if (client != null) logLine("client stopped")
         client = null
+        roster = null
         return getOrStart(secretHex, tailnetDir)
     }
 

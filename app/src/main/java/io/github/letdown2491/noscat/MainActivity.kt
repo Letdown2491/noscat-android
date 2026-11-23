@@ -379,8 +379,11 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val members = remember { mutableStateOf<List<TailnetMember>?>(null) }
-    var selectedNpub by remember { mutableStateOf<String?>(null) }
+    // Seed from the cached roster so revisiting this tab is instant: the
+    // device list and the pill render immediately, and the fetch below only
+    // refreshes names (advert lookups over relays take a moment).
+    val members = remember { mutableStateOf(ClientHolder.roster) }
+    var selectedNpub by remember { mutableStateOf<String?>(ClientHolder.roster?.firstOrNull()?.npub) }
     var syncing by remember { mutableStateOf(false) }
     var showForward by remember { mutableStateOf(false) }
     var showDiagnostics by remember { mutableStateOf(false) }
@@ -423,6 +426,7 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
                 val visible = others(list)
                 members.value = visible
                 selectedNpub = visible.firstOrNull()?.npub
+                ClientHolder.roster = visible
             },
             { ClientHolder.logLine("cannot read tailnet: ${it.message}") },
         )
@@ -459,7 +463,7 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
         ) {
             Text("noscat", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
-            ConnectionChip(connected = members.value != null)
+            ConnectionChip(connected = ClientHolder.client != null)
         }
 
         // Devices
