@@ -26,7 +26,17 @@ android {
     }
 }
 
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
+    // uniffi-generated Kotlin bindings are JNA-based; the @aar classifier is
+    // the Android artifact (classes + native .so libs for jna).
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
+
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")

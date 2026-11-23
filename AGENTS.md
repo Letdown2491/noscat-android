@@ -69,9 +69,21 @@ cargo run -q --bin uniffi-bindgen -- generate \
 ktlint is not installed in the container, so uniffi-bindgen prints a formatting
 warning; the output is still valid Kotlin.
 
-Kotlin: building the app needs an Android SDK (compileSdk 35) and a Gradle wrapper;
-no wrapper is committed yet. When one is added, document the exact command here and
-keep it runnable headless (`./gradlew :app:assembleDebug`).
+Kotlin: build the app with the Gradle wrapper (committed). The host has no system
+JDK; use the tarball JDK in `~/opt`:
+
+```
+JAVA_HOME=$(echo ~/opt/jdk-21*) ./gradlew :app:assembleDebug --no-daemon
+```
+
+Toolchain on this machine (installed by hand, nothing on the immutable host):
+- JDK 21 and Gradle 8.10.2 unpacked in `~/opt` (Gradle was only needed to generate
+  the wrapper; use `./gradlew` for everything else).
+- Android SDK at `~/Android/Sdk` (installed by Studio's first-run wizard), with
+  `local.properties` pointing at it. `cmdline-tools/latest` lives inside the SDK;
+  platforms 35 and 37 and build-tools 35/36 are installed. Licenses already accepted;
+  to add packages:
+  `JAVA_HOME=$(echo ~/opt/jdk-21*) ~/Android/Sdk/cmdline-tools/latest/bin/sdkmanager 'platforms;android-XX'`
 
 UniFFI gotchas already paid for; do not regress:
 - Exported fallible functions must throw a real error enum (`NoscatError`), not bare
@@ -81,6 +93,16 @@ UniFFI gotchas already paid for; do not regress:
 - Exported objects must be `Sync`; `noscat_client::Client` is only `Send`, hence the
   mutex inside `ClientInner`. Its methods are blocking, so holding the lock is fine.
 - Private helper methods cannot live inside an `#[uniffi::export] impl` block.
+- Kotlin bindings need JNA: `implementation("net.java.dev.jna:jna:5.17.0@aar")` in
+  `app/build.gradle.kts` (the `@aar` classifier only; the plain jar duplicates
+  classes and fails the build).
+- Kotlin package comes from `rust/uniffi.toml` (`[bindings.kotlin] package_name`),
+  not a bindgen flag.
+- UniFFI 0.29 Kotlin: Rust constructors map to real Kotlin constructors
+  (`NoscatClient(...)`, not `NoscatClient.new(...)`), flat errors surface as
+  `NoscatException`, `u16` maps to `UShort`, and free functions become top-level
+  `generateIdentity()` / `identityFromSecret()`. Check the generated file when the
+  Rust surface changes.
 
 ## Upgrading noscat
 

@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.dp
 import uniffi.noscat.Event
 import uniffi.noscat.EventListener
 import uniffi.noscat.NoscatClient
-import uniffi.noscat.NoscatError
 import uniffi.noscat.generateIdentity
 
 class MainActivity : ComponentActivity() {
@@ -41,8 +40,10 @@ private fun StatusScreen(modifier: Modifier = Modifier) {
     // event log. Phase 1 replaces this with the real dial / transfer UI.
     val lines = remember { mutableStateListOf<String>() }
     val client = remember {
+        // Constructors throw (UnsatisfiedLinkError included: the .so is not
+        // shipped yet), so catch Throwable, not Exception.
         try {
-            NoscatClient.new(
+            NoscatClient(
                 uniffi.noscat.ClientConfig(
                     identitySecret = null,
                     relays = null,
@@ -54,8 +55,8 @@ private fun StatusScreen(modifier: Modifier = Modifier) {
                         lines.add(0, event.toString())
                     }
                 },
-            ).getOrNull()
-        } catch (_: Exception) {
+            )
+        } catch (_: Throwable) {
             null
         }
     }
