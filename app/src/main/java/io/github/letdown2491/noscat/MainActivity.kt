@@ -1,5 +1,6 @@
 package io.github.letdown2491.noscat
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -17,6 +18,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -86,6 +91,7 @@ import androidx.compose.material.icons.filled.TextSnippet
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.core.content.FileProvider
@@ -96,6 +102,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
@@ -117,14 +125,44 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ClientHolder.init(this)
+        ThemeState.load(this)
         NoscatService.start(this)
         setContent { NoscatApp() }
     }
 }
 
+/** The active theme, observable by Compose and persisted in prefs. Dark
+ * is the default; Settings offers light and follow-the-system too. */
+object ThemeState {
+    var mode by mutableStateOf(AppPrefs.THEME_DARK)
+
+    fun load(context: Context) {
+        mode = AppPrefs.theme(context)
+    }
+
+    fun set(context: Context, value: String) {
+        mode = value
+        AppPrefs.setTheme(context, value)
+    }
+}
+
 @Composable
 private fun NoscatApp() {
-    MaterialTheme {
+    val view = LocalView.current
+    val dark = when (ThemeState.mode) {
+        AppPrefs.THEME_LIGHT -> false
+        AppPrefs.THEME_SYSTEM -> isSystemInDarkTheme()
+        else -> true
+    }
+    // Status bar icons follow the theme: light icons over the dark scheme,
+    // dark icons over the light one.
+    SideEffect {
+        val window = (view.context as? Activity)?.window ?: return@SideEffect
+        WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
+    }
+    MaterialTheme(
+        colorScheme = if (dark) darkColorScheme() else lightColorScheme(),
+    ) {
         Scaffold { padding -> Root(Modifier.padding(padding)) }
     }
 }
@@ -821,6 +859,26 @@ private fun SettingsScreen(onDisconnect: () -> Unit) {
         // Connection state lives on the chip above; the npub is copyable
         // from this device's row on the Devices tab.
         Spacer(Modifier.height(4.dp))
+
+        // Theme: dark is the default, applied app-wide immediately.
+        Text("Theme", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = ThemeState.mode == AppPrefs.THEME_DARK,
+                onClick = { ThemeState.set(context, AppPrefs.THEME_DARK) },
+                label = { Text("Dark") },
+            )
+            FilterChip(
+                selected = ThemeState.mode == AppPrefs.THEME_LIGHT,
+                onClick = { ThemeState.set(context, AppPrefs.THEME_LIGHT) },
+                label = { Text("Light") },
+            )
+            FilterChip(
+                selected = ThemeState.mode == AppPrefs.THEME_SYSTEM,
+                onClick = { ThemeState.set(context, AppPrefs.THEME_SYSTEM) },
+                label = { Text("System") },
+            )
+        }
 
         // Device name.
         Text("Device name", style = MaterialTheme.typography.titleMedium)

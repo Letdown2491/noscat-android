@@ -93,4 +93,20 @@ object AppPrefs {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_DEVICE_NAME, name).commit()
     }
+
+    private const val KEY_THEME = "theme"
+    const val THEME_DARK = "dark"
+    const val THEME_LIGHT = "light"
+    const val THEME_SYSTEM = "system"
+
+    /** The UI theme. Dark is the default: the app is a terminal-like mesh
+     * tool used at night, and dark saves the battery on OLED. */
+    fun theme(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_THEME, THEME_DARK) ?: THEME_DARK
+
+    fun setTheme(context: Context, value: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_THEME, value).commit()
+    }
 }
