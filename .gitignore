@@ -1,0 +1,14 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Rust / uniffi
+rust/target/
+rust/bindings/
+app/src/main/java/uniffi/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
