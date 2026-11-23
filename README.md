@@ -9,5 +9,20 @@ send and receive files). Roadmap and agent guidance in [AGENTS.md](AGENTS.md).
 
 ## Building
 
-Rust parts build in the podman container (host has no toolchain); see AGENTS.md for
-the exact commands. The app itself needs an Android SDK (compileSdk 35).
+Two steps: the native bridge, then the app.
+
+1. Native bridge (Rust builds in the podman container; the script mounts the
+   host Android NDK and cross-compiles for arm64, then strips the .so into
+   `app/src/main/jniLibs/`):
+
+   ```
+   ./scripts/build-native.sh
+   ```
+
+2. The app itself (needs the JDK 21 tarball in `~/opt`):
+
+   ```
+   JAVA_HOME=$(echo ~/opt/jdk-21*) ./gradlew :app:assembleDebug --no-daemon
+   ```
+
+The APK lands in `app/build/outputs/apk/debug/`.

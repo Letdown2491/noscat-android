@@ -7,6 +7,7 @@ local.properties
 rust/target/
 rust/bindings/
 app/src/main/java/uniffi/
+app/src/main/jniLibs/
 
 # IDE
 .idea/
