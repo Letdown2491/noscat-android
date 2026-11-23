@@ -1005,7 +1005,10 @@ private fun SelfCard(name: String, npub: String) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            // Match the device rows: content starts at 8dp, and the chip's
+            // right edge lines up with the last action icon's glyph (an
+            // IconButton's visual sits 12dp inside its 48dp touch target).
+            modifier = Modifier.padding(start = 8.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
         ) {
             // You are online exactly when the node is: the app is running,
             // listening, and advertising.
