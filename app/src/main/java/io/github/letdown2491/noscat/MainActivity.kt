@@ -56,16 +56,28 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Slideshow
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material.icons.filled.TextSnippet
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,6 +89,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -685,6 +698,12 @@ private fun FilesScreen(onDisconnect: () -> Unit) {
                         .clickable { openInboxFile(context, f) }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
+                    Icon(
+                        fileIcon(f.name),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 10.dp),
+                    )
                     Column(Modifier.weight(1f)) {
                         Text(
                             f.name,
@@ -1379,6 +1398,27 @@ private fun inboxFiles(context: Context): List<File> {
 }
 
 /** Guess a MIME type from a file's extension ("" when unknown). */
+/** The icon for a received file, by extension (case-insensitive): the
+ * shape alone should say what kind of thing landed. Unknown extensions
+ * get the generic file icon. */
+private fun fileIcon(name: String): ImageVector {
+    val ext = name.substringAfterLast('.', "").lowercase()
+    return when (ext) {
+        "jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "svg" -> Icons.Filled.Image
+        "mp4", "mov", "mkv", "webm", "avi" -> Icons.Filled.Movie
+        "mp3", "wav", "flac", "ogg", "m4a", "aac" -> Icons.Filled.MusicNote
+        "pdf" -> Icons.Filled.PictureAsPdf
+        "doc", "docx", "odt", "pages" -> Icons.Filled.Description
+        "xls", "xlsx", "csv", "ods", "numbers" -> Icons.Filled.TableChart
+        "ppt", "pptx", "odp", "key" -> Icons.Filled.Slideshow
+        "zip", "tar", "gz", "7z", "rar", "bz2", "xz" -> Icons.Filled.FolderZip
+        "kt", "rs", "py", "js", "ts", "c", "cpp", "java", "sh", "toml", "json" -> Icons.Filled.Code
+        "txt", "md", "log" -> Icons.Filled.TextSnippet
+        "apk" -> Icons.Filled.Android
+        else -> Icons.Filled.InsertDriveFile
+    }
+}
+
 private fun mimeFor(name: String): String {
     val ext = name.substringAfterLast('.', "").lowercase()
     return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: ""
