@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Foreground layer of the adaptive icon: the noscat cat and the mesh
+     nodes. The glow filter from the source SVG is dropped (vectors cannot
+     blur); the dots read fine without it at launcher sizes. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <!-- mesh nodes -->
+    <path
+        android:fillColor="#eafcff"
+        android:pathData="M650.8,161.6a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z
+M875.4,386.2a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z
+M875.4,703.8a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z
+M650.8,928.4a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z
+M333.2,928.4a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z
+M108.6,703.8a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z
+M108.6,386.2a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z
+M333.2,161.6a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z" />
+    <!-- cat head -->
+    <path android:pathData="M512,805C330,805 238,690 238,548C238,440 262,345 282,258C345,275 425,322 462,368C492,361 532,361 562,368C599,322 679,275 742,258C762,345 786,440 786,548C786,690 694,805 512,805Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="238" android:startY="258"
+                android:endX="786" android:endY="805"
+                android:startColor="#7ff7e1"
+                android:endColor="#8c63ff" />
+        </aapt:attr>
+    </path>
+    <!-- eyes, nose, whiskers -->
+    <path
+        android:fillColor="#0a1024"
+        android:pathData="M370,545a40,52 0 1,0 80,0a40,52 0 1,0 -80,0Z
+M574,545a40,52 0 1,0 80,0a40,52 0 1,0 -80,0Z
+M512,640L478,676Q512,696 546,676Z" />
+    <path
+        android:fillColor="#eafcff"
+        android:pathData="M396,545a14,14 0 1,0 28,0a14,14 0 1,0 -28,0Z
+M600,545a14,14 0 1,0 28,0a14,14 0 1,0 -28,0Z" />
+    <path
+        android:pathData="M410,545H614"
+        android:strokeColor="#cceafcff"
+        android:strokeWidth="6"
+        android:fillColor="#00000000" />
+</vector>

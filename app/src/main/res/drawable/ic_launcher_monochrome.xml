@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome (themed) icon: the cat silhouette with the eyes and nose
+     knocked out. Tinted by the launcher, so a single flat color. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:fillColor="#ffffffff"
+        android:fillType="evenOdd"
+        android:pathData="M512,805C330,805 238,690 238,548C238,440 262,345 282,258C345,275 425,322 462,368C492,361 532,361 562,368C599,322 679,275 742,258C762,345 786,440 786,548C786,690 694,805 512,805Z
+M370,545a40,52 0 1,0 80,0a40,52 0 1,0 -80,0Z
+M574,545a40,52 0 1,0 80,0a40,52 0 1,0 -80,0Z
+M512,640L478,676Q512,696 546,676Z" />
+</vector>

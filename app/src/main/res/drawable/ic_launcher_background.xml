@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Background layer of the adaptive icon: night-sky gradient, orbit ring,
+     and the mesh web. Full-bleed 1024x1024; the launcher mask crops it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path android:pathData="M0,0h1024v1024h-1024z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0" android:startY="0"
+                android:endX="0" android:endY="1024"
+                android:startColor="#0a1024"
+                android:endColor="#10294a" />
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M97,545a415,415 0 1,0 830,0a415,415 0 1,0 -830,0Z"
+        android:strokeColor="#736fe9d8"
+        android:strokeWidth="5"
+        android:fillColor="#00000000" />
+    <path
+        android:strokeColor="#386fe9d8"
+        android:strokeWidth="4"
+        android:fillColor="#00000000"
+        android:pathData="M670.8,161.6v766.8M895.4,386.2L353.2,928.4M895.4,703.8H128.6M670.8,928.4L128.6,386.2M353.2,928.4V161.6M128.6,703.8L670.8,161.6M128.6,386.2h766.8M353.2,161.6l542.2,542.2" />
+</vector>
