@@ -35,7 +35,10 @@ layer stays native Kotlin instead of a cross-platform framework.
    with no Rust toolchain. Do not try `cargo` on the host.
 5. **Events arrive on a background thread.** `EventListener.on_event` is called from a
    Rust-spawned thread. Kotlin must hop to the main thread before touching UI state.
-6. **GitHub pushes go over SSH** (`git@github.com:...`), not HTTPS; the stored HTTPS
+6. **No FFI call on the main thread.** Even a trivial getter (`npub()`) can stall
+   behind the node's relay work inside the Rust locks and ANR the app. Cache values
+   at client start (`ClientHolder.myNpub`) and run sends on `Dispatchers.IO`.
+7. **GitHub pushes go over SSH** (`git@github.com:...`), not HTTPS; the stored HTTPS
    credential cannot push workflow files.
 
 ## Layout
@@ -49,6 +52,12 @@ layer stays native Kotlin instead of a cross-platform framework.
   `ClientHolder.kt` owns the running client and exposes client lifetime,
   roster cache, chat history, unread counts, and transfer state as Compose
   snapshot state.
+  The roster persists to `filesDir/roster.json` so startup renders the
+  device list instantly. Devices sync themselves: on tab open (throttled
+  to a minute), again once the node is listening on the relays (a sync
+  before that sees nothing), and on pull to refresh. `meshSync` returns
+  membership only; the background sync enriches it with `meshMembers`
+  for advert names and presence (`lastSeenSecs`, green/red dot).
 - `scripts/build-native.sh` - cross-compiles the `noscat-ffi` crate
   for arm64, strips the .so into `app/src/main/jniLibs/`, and regenerates the
   Kotlin bindings. `local` builds the `~/Documents/noscat` checkout.
