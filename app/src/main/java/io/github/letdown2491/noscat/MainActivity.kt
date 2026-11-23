@@ -51,6 +51,8 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.noscat.TailnetMember
@@ -213,9 +215,24 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
                             joining = true
                             joinError = null
                             scope.launch {
+                                // Keep republishing while we wait: the owner's
+                                // watcher only sees key packages published
+                                // after it started, so a single publish at
+                                // screen-open is easily missed.
+                                val republish = launch {
+                                    while (isActive) {
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                tailnetPrepare(dir.absolutePath)
+                                            }
+                                        }
+                                        delay(30_000)
+                                    }
+                                }
                                 val res = withContext(Dispatchers.IO) {
                                     runCatching { tailnetJoin(dir.absolutePath, 180uL) }
                                 }
+                                republish.cancel()
                                 joining = false
                                 res.fold(
                                     { m ->
