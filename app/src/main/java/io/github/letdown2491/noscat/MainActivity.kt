@@ -51,7 +51,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -63,6 +62,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -213,6 +213,7 @@ private fun Root(modifier: Modifier = Modifier) {
                         openPeer = chatPeer,
                         onOpenPeer = { chatPeer = it },
                         onChatClosed = { chatPeer = null },
+                        onDisconnect = disconnect,
                     )
                     "files" -> FilesScreen(onDisconnect = disconnect)
                     "settings" -> SettingsScreen(onDisconnect = disconnect)
@@ -460,7 +461,8 @@ private fun DevicesScreen(
     // device list and the pill render immediately, and the fetch below only
     // refreshes names (advert lookups over relays take a moment).
     val members = remember { mutableStateOf(ClientHolder.roster) }
-    var selectedNpub by remember { mutableStateOf<String?>(ClientHolder.roster?.firstOrNull()?.npub) }
+    // Which device row launched the file picker (send target).
+    var sendTarget by remember { mutableStateOf<String?>(null) }
     var syncing by remember { mutableStateOf(false) }
     // Which device the forward dialog targets (row action), or null = closed.
     var forwardTarget by remember { mutableStateOf<String?>(null) }
@@ -481,9 +483,7 @@ private fun DevicesScreen(
                 { list ->
                     val visible = others(list)
                     members.value = visible
-                    if (selectedNpub == null || visible.none { it.npub == selectedNpub }) {
-                        selectedNpub = visible.firstOrNull()?.npub
-                    }
+                    ClientHolder.cacheRoster(visible)
                 },
                 { ClientHolder.logLine("sync failed: ${it.message}") },
             )
@@ -498,7 +498,6 @@ private fun DevicesScreen(
             { list ->
                 val visible = others(list)
                 members.value = visible
-                selectedNpub = visible.firstOrNull()?.npub
                 ClientHolder.cacheRoster(visible)
             },
             { ClientHolder.logLine("cannot read mesh: ${it.message}") },
@@ -513,8 +512,8 @@ private fun DevicesScreen(
             val f = withContext(Dispatchers.IO) { copyToCache(context, uri) }
             when {
                 f == null -> toast(context, "could not read that file")
-                selectedNpub == null -> toast(context, "select a device first")
-                else -> ClientHolder.sendFile(f.absolutePath, selectedNpub!!)
+                sendTarget == null -> toast(context, "select a device first")
+                else -> ClientHolder.sendFile(f.absolutePath, sendTarget!!)
             }
         }
     }
@@ -526,23 +525,19 @@ private fun DevicesScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("noscat", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
-        }
-
-        // Devices
+        // Devices: the connection chip stays the row's right edge, as on
+        // every tab; refresh is an icon tucked in beside it.
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Devices", style = MaterialTheme.typography.titleLarge)
+            Text("Devices", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
-            if (syncing) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            IconButton(onClick = { syncDevices(5uL) }, enabled = !syncing) {
+                if (syncing) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                }
             }
-            TextButton(onClick = { syncDevices(5uL) }) { Text("Refresh") }
+            ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
         }
 
         val list = members.value
@@ -561,10 +556,8 @@ private fun DevicesScreen(
             else -> list.forEach { m ->
                 DeviceCard(
                     member = m,
-                    selected = selectedNpub == m.npub,
-                    onSelect = { selectedNpub = m.npub },
                     onSend = {
-                        selectedNpub = m.npub
+                        sendTarget = m.npub
                         filePicker.launch(arrayOf("*/*"))
                     },
                     onChat = { onOpenChat(m.npub) },
@@ -640,19 +633,15 @@ private fun FilesScreen(onDisconnect: () -> Unit) {
             }
         }
 
-        // Inbox: inbound files land here on their own (node mode).
+        // Received files land here on their own (node mode).
         val files = inbox.value
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Inbox", style = MaterialTheme.typography.titleMedium)
-            if (files.isNotEmpty()) {
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "${files.size} file${if (files.size == 1) "" else "s"}, " +
-                        formatSize(files.sumOf { it.length() }),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        if (files.isNotEmpty()) {
+            Text(
+                "${files.size} file${if (files.size == 1) "" else "s"}, " +
+                    formatSize(files.sumOf { it.length() }),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         Text(
             "files sent to this phone land here automatically - tap one to open it",
@@ -814,12 +803,7 @@ private fun SettingsScreen(onDisconnect: () -> Unit) {
                 contentColor = MaterialTheme.colorScheme.error,
             ),
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Disconnect from the mesh") }
-        Text(
-            "leaves the mesh and forgets the join; rejoin by scanning the owner's QR",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        ) { Text("Disconnect from mesh") }
     }
 
     if (confirmDisconnect) {
@@ -896,20 +880,13 @@ private fun ConnectionChip(connected: Boolean, onDisconnect: (() -> Unit)? = nul
 @Composable
 private fun DeviceCard(
     member: MeshMember,
-    selected: Boolean,
-    onSelect: () -> Unit,
     onSend: () -> Unit,
     onChat: () -> Unit,
     onForward: () -> Unit,
 ) {
     Card(
-        onClick = onSelect,
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -917,7 +894,6 @@ private fun DeviceCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            RadioButton(selected = selected, onClick = onSelect)
             Column(Modifier.weight(1f)) {
                 Text(
                     memberLabel(member),
@@ -1016,6 +992,7 @@ private fun ChatScreen(
     openPeer: String?,
     onOpenPeer: (String) -> Unit,
     onChatClosed: () -> Unit,
+    onDisconnect: () -> Unit,
 ) {
     val myNpub = ClientHolder.client?.let { it.npub() }
 
@@ -1041,7 +1018,14 @@ private fun ChatScreen(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Chat", style = MaterialTheme.typography.titleLarge)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Chat", style = MaterialTheme.typography.headlineMedium)
+                Spacer(Modifier.weight(1f))
+                ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
+            }
             val list = members.value
             when {
                 list == null -> Text(
