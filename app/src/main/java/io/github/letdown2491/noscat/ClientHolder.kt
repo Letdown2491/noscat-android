@@ -136,7 +136,10 @@ object ClientHolder {
                 IdentityStore.save(context, it)
             }
         }
-        return getOrStart(secret, dir)
+        return getOrStart(secret, dir).also {
+            // Trash from the previous session never survived an undo.
+            purgeInboxTrash(context)
+        }
     }
 
     fun logLine(line: String) {
@@ -281,10 +284,44 @@ object ClientHolder {
     }
 
     /** Delete a received inbox file; bumps the inbox so the list refreshes. */
-    fun deleteInboxFile(file: File): Boolean {
-        val ok = file.delete()
+    /** The received-files inbox (external storage when available). */
+    fun inboxDir(context: Context): File =
+        context.getExternalFilesDir(null) ?: context.filesDir
+
+    /** Deleted files wait here: restorable while the app lives, purged at
+     * the next start. */
+    private fun trashDir(context: Context): File =
+        File(inboxDir(context), ".trash").apply { mkdirs() }
+
+    /** Move a received file to the trash: the row disappears, and the
+     * snackbar's Undo can put it back. */
+    fun trashInboxFile(context: Context, file: File): Boolean {
+        val ok = runCatching {
+            file.renameTo(File(trashDir(context), file.name))
+        }.getOrDefault(false)
         if (ok) inboxVersion++
         return ok
+    }
+
+    /** Undo: put a trashed file back in the inbox under its old name. */
+    fun restoreInboxFile(context: Context, name: String): Boolean {
+        val ok = runCatching {
+            File(trashDir(context), name).renameTo(File(inboxDir(context), name))
+        }.getOrDefault(false)
+        Log.d("noscat", "restore $name ok=$ok")
+        if (ok) {
+            inboxVersion++
+            // The emulated-storage view can serve a stale directory right
+            // after a rename; relist once more to heal that.
+            main.postDelayed({ inboxVersion++ }, 500)
+        }
+        return ok
+    }
+
+    /** Empty the trash. Called at startup: trashed files stay restorable
+     * for the whole session, but never outlive the app. */
+    fun purgeInboxTrash(context: Context) {
+        trashDir(context).listFiles()?.forEach { it.delete() }
     }
 
     /** Sends a file, tracking progress. Errors land in the log, not the void. */

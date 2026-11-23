@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import android.widget.Toast
@@ -51,6 +52,10 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -614,123 +619,165 @@ private fun DevicesScreen(
 @Composable
 private fun FilesScreen(onDisconnect: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     // The inbox re-lists whenever a transfer lands (or a file is deleted).
     val inboxVersion = ClientHolder.inboxVersion
     val inbox = remember { mutableStateOf(inboxFiles(context)) }
-    LaunchedEffect(inboxVersion) { inbox.value = inboxFiles(context) }
+    LaunchedEffect(inboxVersion) {
+        inbox.value = inboxFiles(context)
+        Log.d("noscat", "relist v=$inboxVersion n=${inbox.value.size}")
+    }
 
+    // Delete: confirm first, then trash with an undo snackbar. The file
+    // hides in .trash until the next app start, so Undo works even after
+    // the snackbar is gone.
+    val snackbar = remember { SnackbarHostState() }
+    var confirmDelete by remember { mutableStateOf<File?>(null) }
+
+    Box(Modifier.fillMaxSize()) {
     Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Files", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
-        }
-
-        // Live transfer progress (either direction).
-        ClientHolder.transfer?.let { t ->
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                ),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(
-                    Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        if (t.incoming) "Receiving ${t.name}" else "Sending ${t.name}",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    if (!t.incoming && t.total > 0) {
-                        LinearProgressIndicator(
-                            progress = { t.percent / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text(
-                            "${t.percent}%  (${t.sent / 1024} of ${t.total / 1024} KB)",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    } else {
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                    }
-                }
+                Text("Files", style = MaterialTheme.typography.headlineMedium)
+                Spacer(Modifier.weight(1f))
+                ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
             }
-        }
 
-        // Received files land here on their own (node mode).
-        val files = inbox.value
-        if (files.isNotEmpty()) {
-            Text(
-                "${files.size} file${if (files.size == 1) "" else "s"}, " +
-                    formatSize(files.sumOf { it.length() }),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (files.isEmpty()) {
-            Text(
-                "nothing received yet. files sent to this phone land here " +
-                    "even when the app is closed, and tapping one opens it",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            files.forEach { f ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            MaterialTheme.colorScheme.surfaceContainerLow,
-                            RoundedCornerShape(8.dp),
-                        )
-                        .clickable { openInboxFile(context, f) }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+            // Live transfer progress (either direction).
+            ClientHolder.transfer?.let { t ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(
-                        fileIcon(f.name),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 10.dp),
-                    )
-                    Column(Modifier.weight(1f)) {
+                    Column(
+                        Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Text(
-                            f.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            if (t.incoming) "Receiving ${t.name}" else "Sending ${t.name}",
+                            style = MaterialTheme.typography.titleSmall,
                         )
-                        Text(
-                            formatSize(f.length()),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(onClick = {
-                        if (!ClientHolder.deleteInboxFile(f)) {
-                            toast(context, "could not delete ${f.name}")
+                        if (!t.incoming && t.total > 0) {
+                            LinearProgressIndicator(
+                                progress = { t.percent / 100f },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Text(
+                                "${t.percent}%  (${t.sent / 1024} of ${t.total / 1024} KB)",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        } else {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
                         }
-                    }) {
+                    }
+                }
+            }
+
+            // Received files land here on their own (node mode).
+            val files = inbox.value
+            if (files.isNotEmpty()) {
+                Text(
+                    "${files.size} file${if (files.size == 1) "" else "s"}, " +
+                        formatSize(files.sumOf { it.length() }),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (files.isEmpty()) {
+                Text(
+                    "nothing received yet. files sent to this phone land here " +
+                        "even when the app is closed, and tapping one opens it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                files.forEach { f ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerLow,
+                                RoundedCornerShape(8.dp),
+                            )
+                            .clickable { openInboxFile(context, f) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
                         Icon(
-                            Icons.Filled.Close,
-                            contentDescription = "Delete ${f.name}",
+                            fileIcon(f.name),
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(end = 10.dp),
                         )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                f.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                formatSize(f.length()),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = { confirmDelete = f }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Delete ${f.name}",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
         }
+        SnackbarHost(
+            hostState = snackbar,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+    }
+
+    confirmDelete?.let { f ->
+        AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Delete file?") },
+            text = { Text("${f.name} will be removed from the inbox. you can undo for a few seconds after.") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmDelete = null
+                    if (ClientHolder.trashInboxFile(context, f)) {
+                        scope.launch {
+                            val r = snackbar.showSnackbar(
+                                message = "deleted ${f.name}",
+                                actionLabel = "Undo",
+                                duration = SnackbarDuration.Long,
+                            )
+                            if (r == SnackbarResult.ActionPerformed) {
+                                ClientHolder.restoreInboxFile(context, f.name)
+                            }
+                        }
+                    } else {
+                        toast(context, "could not delete ${f.name}")
+                    }
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { confirmDelete = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 
@@ -1391,10 +1438,12 @@ private fun formatSize(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-/** Files received into the app inbox, newest first. */
+/** Files received into the app inbox, newest first. The trash directory
+ * is not inbox content. */
 private fun inboxFiles(context: Context): List<File> {
     val dir = context.getExternalFilesDir(null) ?: context.filesDir
-    return dir.listFiles()?.sortedByDescending { it.lastModified() } ?: emptyList()
+    return dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }
+        ?: emptyList()
 }
 
 /** Guess a MIME type from a file's extension ("" when unknown). */
