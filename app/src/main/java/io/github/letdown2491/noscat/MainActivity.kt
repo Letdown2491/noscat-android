@@ -359,6 +359,11 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
     val transfer = ClientHolder.transfer
     val inboxVersion = ClientHolder.inboxVersion
 
+    // This phone is a tailnet member too (its device identity) - dialing
+    // yourself is meaningless, so it never appears in the list.
+    val myNpub = ClientHolder.client?.let { it.npub() }
+    fun others(list: List<TailnetMember>) = list.filter { it.npub != myNpub }
+
     fun syncDevices(waitSecs: ULong) {
         scope.launch {
             syncing = true
@@ -368,10 +373,10 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
             syncing = false
             res.fold(
                 { list ->
-                    members.value = list
-                    if (selectedNpub == null || list.none { it.npub == selectedNpub }) {
-                        selectedNpub = list.firstOrNull { it.isOwner }?.npub
-                            ?: list.firstOrNull()?.npub
+                    val visible = others(list)
+                    members.value = visible
+                    if (selectedNpub == null || visible.none { it.npub == selectedNpub }) {
+                        selectedNpub = visible.firstOrNull()?.npub
                     }
                 },
                 { ClientHolder.logLine("sync failed: ${it.message}") },
@@ -385,9 +390,9 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
         }
         res.fold(
             { list ->
-                members.value = list
-                selectedNpub = list.firstOrNull { it.isOwner }?.npub
-                    ?: list.firstOrNull()?.npub
+                val visible = others(list)
+                members.value = visible
+                selectedNpub = visible.firstOrNull()?.npub
             },
             { ClientHolder.logLine("cannot read tailnet: ${it.message}") },
         )
