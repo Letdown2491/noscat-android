@@ -24,6 +24,10 @@ layer stays native Kotlin instead of a cross-platform framework.
 1. **Zero protocol code in this repo.** If a change needs Noise, UDP framing, Nostr
    events, relay logic, advert handling, or FFI surface changes, it belongs in the
    noscat repo's `crates/noscat-ffi`, published to crates.io, then bumped here.
+   The upstream API contract is `API.md` in the
+   [noscat repo](https://github.com/Letdown2491/noscat/blob/main/API.md): consult
+   it before touching event handling, mesh glue, or the FFI surface. Its
+   "Current as of" stamp must be >= the noscat-ffi version in this repo's build.
 2. **Kotlin sees only safe surfaces:** identities (npub strings), plain commands
    (`forward`, `sendFile`, `sendChat`, `up`), the mesh helpers
    (`meshPrepare`/`meshJoin`/`meshSync`/`meshMembers`), and the
@@ -44,14 +48,17 @@ layer stays native Kotlin instead of a cross-platform framework.
 ## Layout
 
 - `app/` - the Android app. `MainActivity.kt` holds the screens: the join flow
-  (mesh invite by QR), and a four-tab layout: Devices (roster with per-row
-  chat / send-file / forward actions), Chat (conversation list and bubbles),
-  Files (inbox plus live transfer progress), Settings (status, device name,
-  diagnostics). Disconnect lives on the connection chip itself (click it, on
-  any tab's header) plus a button in Settings, both behind a confirm dialog.
+  (mesh invite by QR), and a five-tab layout with Devices in the center and
+  slightly larger: Chat (conversation list and bubbles), Files (inbox plus
+  live transfer progress), Devices (roster with per-row actions in the
+  desktop app's order: chat, send-file, forward, clipboard), Services (the
+  port forwards this phone is running, each stoppable; expose joins this
+  tab in phase 2), Settings (status, device name, diagnostics). Disconnect
+  lives on the connection chip itself (click it, on any tab's header) plus
+  a button in Settings, both behind a confirm dialog.
   `ClientHolder.kt` owns the running client and exposes client lifetime,
-  roster cache, chat history, unread counts, and transfer state as Compose
-  snapshot state.
+  roster cache, chat history, unread counts, forwards, and transfer state
+  as Compose snapshot state.
   The roster persists to `filesDir/roster.json` so startup renders the
   device list instantly. Devices refresh themselves: `ClientHolder`
   syncs on a 2 minute timer for the life of the client, plus once when
@@ -125,11 +132,20 @@ Kotlin bindings regenerate with it.
 - File transfers complete asynchronously: `sendFile` returns immediately; progress,
   success, and failure arrive as `TransferProgress` / `TransferDone` /
   `TransferFailed` events. Inbound files land in the app inbox automatically.
-- Chat is asynchronous too: `sendChat` returns after the peer echoes the delivery
-  FIN (the optimistic bubble is marked delivered then), and failure surfaces as
-  `ChatFailed`. Incoming messages arrive as `ChatMessage`. A transport-level
-  FIN (empty Noise payload) carries the message end - the router must pass
-  16-byte frames; see noscat commit `52f00c0`.
+- Chat is asynchronous too: 0.4.0 sends (`sendChat`, `sendClipboard`) are
+  fire-and-forget; the optimistic bubble is marked delivered by the
+  `ChatDelivered` event (the peer's FIN echo), never by the call returning.
+  Failure surfaces as `ChatFailed`. Incoming messages arrive as
+  `ChatMessage`. A transport-level FIN (empty Noise payload) carries the
+  message end - the router must pass 16-byte frames; see noscat commit
+  `52f00c0`.
+- An outgoing send can be cancelled: `cancelTransfer(path, peer)` stops it
+  between chunks (`TransferCancelled` event); the receiver keeps a
+  resumable partial, so the next send of the same file continues.
+- Port forwards are managed, not write-only: `forward()` returns an id,
+  `listForwards()` snapshots them, `cancelForward(id)` stops one, and every
+  end arrives as `ForwardStopped{id, error}` so the Services list
+  reconciles.
 
 ## Conventions
 
