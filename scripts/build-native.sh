@@ -1,10 +1,15 @@
 #!/bin/sh
-# Cross-compiles the UniFFI bridge for Android (arm64) in the podman container
-# and drops the .so into the app's jniLibs. Run from the repo root.
+# Cross-compiles the published noscat-ffi crate for Android arm64 in the podman
+# container and installs the stripped .so plus regenerated Kotlin bindings into
+# the app. Run from the repo root.
 #
 # The Android NDK lives on the host (installed via the SDK's sdkmanager); it is
 # mounted into the container because the host has no Rust toolchain.
+#
+# Usage: scripts/build-native.sh [noscat-ffi-version]   # default: NFFI_VERSION below
 set -eu
+
+NFFI_VERSION="${1:-0.2.0}"
 
 NDK="$HOME/Android/Sdk/ndk/27.2.12479018"
 [ -d "$NDK" ] || { echo "NDK not found at $NDK" >&2; exit 1; }
@@ -12,18 +17,30 @@ NDK="$HOME/Android/Sdk/ndk/27.2.12479018"
 API=26
 
 podman run --rm \
-  -v noscat-cargo-home:/usr/local/cargo \
-  -v "$PWD/rust:/work:Z" \
+  -v noscat-cargo-home:/usr/local/cargo:Z \
+  -v "$PWD/app/src/main:/out:Z" \
   -v "$NDK:/ndk:Z" \
   -e NDK_HOME=/ndk \
   -e CC_aarch64_linux_android=/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang \
   -e AR_aarch64_linux_android=/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar \
   -e CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang \
-  -w /work localhost/noscat-dev \
-  sh -c "rustup target add aarch64-linux-android && cargo build --target aarch64-linux-android"
+  -w /tmp localhost/noscat-dev \
+  sh -c "set -eu
+    mkdir -p /tmp/pull/src && cd /tmp/pull
+    printf '[package]\nname=\"pull\"\nversion=\"0.0.0\"\nedition=\"2021\"\n[dependencies]\nnoscat-ffi=\"=${NFFI_VERSION}\"\n' > Cargo.toml
+    echo 'fn main() {}' > src/main.rs
+    cargo fetch
+    cp -r \$(ls -d /usr/local/cargo/registry/src/*/noscat-ffi-${NFFI_VERSION}) /tmp/ffi
+    cd /tmp/ffi
+    rustup target add aarch64-linux-android
+    cargo build --target aarch64-linux-android
+    cargo run -q --bin uniffi-bindgen -- generate \
+      --library ./target/aarch64-linux-android/debug/libnoscat_ffi.so \
+      --language kotlin --out-dir /tmp/bindings
+    mkdir -p /out/jniLibs/arm64-v8a /out/java/uniffi/noscat
+    /ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
+      -o /out/jniLibs/arm64-v8a/libnoscat_ffi.so \
+      ./target/aarch64-linux-android/debug/libnoscat_ffi.so
+    cp /tmp/bindings/uniffi/noscat/noscat_ffi.kt /out/java/uniffi/noscat/noscat_android.kt"
 
-mkdir -p app/src/main/jniLibs/arm64-v8a
-"$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" \
-  -o app/src/main/jniLibs/arm64-v8a/libnoscat_android.so \
-  rust/target/aarch64-linux-android/debug/libnoscat_android.so
-echo "installed app/src/main/jniLibs/arm64-v8a/libnoscat_android.so"
+echo "installed jniLibs and regenerated bindings (noscat-ffi ${NFFI_VERSION})"

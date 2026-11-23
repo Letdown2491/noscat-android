@@ -63,3 +63,19 @@ object IdentityStore {
         return gen.generateKey()
     }
 }
+
+/** Plain (non-secret) app settings. */
+object AppPrefs {
+    private const val PREFS = "noscat-app"
+    private const val KEY_TAILNET = "tailnet_dir"
+
+    /** Path of the imported tailnet device dir, or null when not joined. */
+    fun tailnetDir(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_TAILNET, null)
+
+    fun setTailnetDir(context: Context, path: String?) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_TAILNET, path).commit()
+    }
+}

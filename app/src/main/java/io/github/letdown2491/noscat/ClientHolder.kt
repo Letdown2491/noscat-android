@@ -1,7 +1,9 @@
 package io.github.letdown2491.noscat
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.widget.Toast
 import uniffi.noscat.Event
 import uniffi.noscat.EventListener
 import uniffi.noscat.NoscatClient
@@ -18,6 +20,12 @@ object ClientHolder {
         private set
 
     private val main = Handler(Looper.getMainLooper())
+    private var appContext: Context? = null
+
+    /** Call once from the activity so transfer outcomes can toast. */
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
 
     fun logLine(line: String) {
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -31,29 +39,57 @@ object ClientHolder {
     /**
      * Starts (or returns) the running client. Blocking FFI call, so run it off
      * the main thread. Returns null and logs when the native side fails.
+     * `tailnetDir` scopes tunnels to a tailnet group (PSK auth) - pass the
+     * imported device directory, or null for bare (non-tailnet) tunnels.
      */
     @Synchronized
-    fun getOrStart(secretHex: String?): NoscatClient? {
+    fun getOrStart(secretHex: String?, tailnetDir: String? = null): NoscatClient? {
         client?.let { return it }
         return try {
             val c = NoscatClient(
                 uniffi.noscat.ClientConfig(
                     identitySecret = secretHex,
                     relays = null,
-                    tailnetDir = null,
+                    tailnetDir = tailnetDir,
                     listenPort = null,
                 ),
                 object : EventListener {
-                    override fun onEvent(event: Event) = logLine(render(event))
+                    override fun onEvent(event: Event) {
+                        logLine(render(event))
+                        // Transfers complete out of band; surface the outcome
+                        // as a toast so it is visible without scrolling.
+                        if (event is Event.TransferDone || event is Event.TransferFailed) {
+                            main.post {
+                                Toast.makeText(
+                                    appContext,
+                                    render(event),
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        }
+                    }
                 },
             )
             client = c
-            logLine("client started")
+            logLine(
+                if (tailnetDir != null) "client started (tailnet joined)" else "client started",
+            )
             c
         } catch (t: Throwable) {
             logLine("client failed to start: $t")
             null
         }
+    }
+
+    /**
+     * Stops the running client and starts a new one with the given config.
+     * Dropping the UniFFI object tears down its runtime and sockets.
+     */
+    @Synchronized
+    fun restart(secretHex: String?, tailnetDir: String?): NoscatClient? {
+        if (client != null) logLine("client stopped")
+        client = null
+        return getOrStart(secretHex, tailnetDir)
     }
 
     fun render(event: Event): String = when (event) {

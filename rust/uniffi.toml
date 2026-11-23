@@ -1,3 +1,0 @@
-# uniffi-bindgen configuration: Kotlin package for generated bindings.
-[bindings.kotlin]
-package_name = "uniffi.noscat"

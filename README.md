@@ -13,12 +13,12 @@ send and receive files, join the owner's tailnet). Roadmap and agent guidance in
 
 Two steps: the native bridge, then the app.
 
-1. Native bridge (Rust builds in the podman container; the script mounts the
-   host Android NDK and cross-compiles for arm64, then strips the .so into
-   `app/src/main/jniLibs/`):
+1. Native bridge (cross-compiles the published `noscat-ffi` crate in the podman
+   container, mounts the host Android NDK, strips the .so into
+   `app/src/main/jniLibs/`, and regenerates the Kotlin bindings):
 
    ```
-   ./scripts/build-native.sh
+   ./scripts/build-native.sh [version]   # default: noscat-ffi 0.2.0
    ```
 
 2. The app itself (needs the JDK 21 tarball in `~/opt`):
