@@ -44,6 +44,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.CircularProgressIndicator
@@ -83,7 +84,6 @@ import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.TableChart
@@ -527,18 +527,32 @@ private fun DevicesScreen(
 
     // This phone is a mesh member too (its device identity) - dialing
     // yourself is meaningless, so it never appears in the list.
-    val myNpub = ClientHolder.client?.let { it.npub() }
+    val myNpub = ClientHolder.myNpub
     fun others(list: List<MeshMember>) = list.filter { it.npub != myNpub }
 
-    fun syncDevices(waitSecs: ULong) {
+    /** Sync the roster from the relays. With `auto`, skipped when the last
+     * sync is fresh: devices update themselves on every visit to this tab,
+     * without hammering the relays on each tab flip. */
+    fun syncDevices(waitSecs: ULong, auto: Boolean = false) {
+        if (auto && System.currentTimeMillis() - ClientHolder.lastRosterSync <
+            AUTO_SYNC_INTERVAL_MS
+        ) return
         scope.launch {
             syncing = true
             val res = withContext(Dispatchers.IO) {
                 runCatching { meshSync(meshDir, waitSecs) }
+                    // meshSync returns membership only (no advert data);
+                    // enrich with names and presence from the per-device
+                    // advert fetch. Slow is fine: this is the background
+                    // sync, and the list renders from the roster meanwhile.
+                    .mapCatching { synced ->
+                        runCatching { meshMembers(meshDir) }.getOrDefault(synced)
+                    }
             }
             syncing = false
             res.fold(
                 { list ->
+                    ClientHolder.lastRosterSync = System.currentTimeMillis()
                     val visible = others(list)
                     members.value = visible
                     ClientHolder.cacheRoster(visible)
@@ -549,17 +563,17 @@ private fun DevicesScreen(
     }
 
     LaunchedEffect(meshDir) {
-        val res = withContext(Dispatchers.IO) {
-            runCatching { meshMembers(meshDir) }
-        }
-        res.fold(
-            { list ->
-                val visible = others(list)
-                members.value = visible
-                ClientHolder.cacheRoster(visible)
-            },
-            { ClientHolder.logLine("cannot read mesh: ${it.message}") },
-        )
+        // Devices update themselves: opening the tab syncs (throttled), so
+        // joins, renames, and presence arrive without any button. The list
+        // meanwhile renders from the persisted roster - the FFI's member
+        // fetch would add a relay round-trip per device.
+        syncDevices(5uL, auto = true)
+    }
+    // The sync above can run before the node has finished connecting to
+    // the relays (it can take tens of seconds) and so see nothing. Once
+    // the node is up, sync again for real - this one skips the throttle.
+    LaunchedEffect(ClientHolder.nodeUp) {
+        if (ClientHolder.nodeUp) syncDevices(5uL)
     }
 
     val filePicker = rememberLauncherForActivityResult(
@@ -571,11 +585,19 @@ private fun DevicesScreen(
             when {
                 f == null -> toast(context, "could not read that file")
                 sendTarget == null -> toast(context, "select a device first")
-                else -> ClientHolder.sendFile(f.absolutePath, sendTarget!!)
+                else -> withContext(Dispatchers.IO) {
+                    ClientHolder.sendFile(f.absolutePath, sendTarget!!)
+                }
             }
         }
     }
 
+    // Pull down to refresh: the manual override for the automatic sync.
+    PullToRefreshBox(
+        isRefreshing = syncing,
+        onRefresh = { syncDevices(5uL) },
+        modifier = Modifier.fillMaxSize(),
+    ) {
     Column(
         Modifier
             .fillMaxSize()
@@ -584,23 +606,10 @@ private fun DevicesScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // Devices: the connection chip stays the row's right edge, as on
-        // every tab; refresh is an icon tucked in beside it.
+        // every tab.
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Devices", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
-            // 32dp box: the default 48dp IconButton height is what pushed
-            // this title lower than the headers on the other tabs.
-            IconButton(
-                onClick = { syncDevices(5uL) },
-                enabled = !syncing,
-                modifier = Modifier.size(32.dp),
-            ) {
-                if (syncing) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
-                }
-            }
             ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
         }
 
@@ -631,9 +640,7 @@ private fun DevicesScreen(
                 }
                 // This device, too: your npub is copyable from the same
                 // list your peers' npubs live in.
-                val selfNpub = ClientHolder.client?.let {
-                    runCatching { it.npub() }.getOrNull()
-                }
+                val selfNpub = ClientHolder.myNpub
                 if (selfNpub != null) {
                     SelfCard(
                         name = AppPrefs.deviceName(context)?.takeIf { it.isNotBlank() }
@@ -650,6 +657,7 @@ private fun DevicesScreen(
             target = forwardTarget ?: "",
             onDismiss = { forwardTarget = null },
         )
+    }
     }
 }
 
@@ -1022,6 +1030,7 @@ private fun DeviceCard(
     onForward: () -> Unit,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val copyNpub = {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
             as android.content.ClipboardManager
@@ -1069,8 +1078,12 @@ private fun DeviceCard(
                 if (text.isNullOrEmpty()) {
                     toast(context, "clipboard is empty")
                 } else {
-                    ClientHolder.sendClipboard(member.npub, text)
-                    toast(context, "clipboard sent to ${memberLabel(member)}")
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            ClientHolder.sendClipboard(member.npub, text)
+                        }
+                        toast(context, "clipboard sent to ${memberLabel(member)}")
+                    }
                 }
             }) {
                 Icon(
@@ -1100,6 +1113,10 @@ private fun DeviceCard(
  * on this timer, so an advert younger than the TTL means the peer is up. */
 private const val ADVERT_TTL_SECS: ULong = 3600uL
 
+/** How often the Devices tab may sync itself on open, so tab flipping
+ * does not hammer the relays. Pull to refresh always syncs. */
+private const val AUTO_SYNC_INTERVAL_MS = 60_000L
+
 /** Online per the mesh presence: the peer's advert is fresh. */
 private fun MeshMember.online(): Boolean =
     lastSeenSecs?.let { it < ADVERT_TTL_SECS } ?: false
@@ -1107,12 +1124,17 @@ private fun MeshMember.online(): Boolean =
 /** Live-tunnel presence dot: green while the peer looks online (fresh
  * advert) or has a tunnel open right now. */
 @Composable
+/** Presence dot: green when the peer looks online (fresh advert or a
+ * live tunnel), red when it does not. Absence of color would read as
+ * "not loaded yet", so offline is stated outright. */
 private fun PresenceDot(live: Boolean) {
-    if (!live) return
     Box(
         Modifier
             .size(8.dp)
-            .background(Color(0xFF2E7D32), CircleShape),
+            .background(
+                if (live) Color(0xFF2E7D32) else Color(0xFFB3261E),
+                CircleShape,
+            ),
     )
 }
 
@@ -1227,20 +1249,13 @@ private fun ChatScreen(
     onChatClosed: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
-    val myNpub = ClientHolder.client?.let { it.npub() }
+    val myNpub = ClientHolder.myNpub
 
-    // Seed from the cached roster so switching tabs renders instantly; the
-    // fetch below refreshes names.
+    // Seed from the persisted roster so switching tabs renders instantly.
+    // No fetch here: the Devices tab's sync owns the roster, and the
+    // FFI's member fetch costs a relay round-trip per device.
     val members = remember { mutableStateOf(ClientHolder.roster) }
-    LaunchedEffect(meshDir) {
-        val res = withContext(Dispatchers.IO) {
-            runCatching { meshMembers(meshDir) }
-        }
-        res.fold(
-            { list -> members.value = list.filter { it.npub != myNpub } },
-            { ClientHolder.logLine("cannot read mesh: ${it.message}") },
-        )
-    }
+    LaunchedEffect(ClientHolder.roster) { members.value = ClientHolder.roster }
 
     val peer = openPeer
     if (peer == null) {

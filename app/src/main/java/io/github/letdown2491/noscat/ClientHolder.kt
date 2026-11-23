@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.compose.runtime.getValue
 import uniffi.noscat.MeshMember
 import androidx.compose.runtime.mutableStateListOf
@@ -31,6 +33,12 @@ object ClientHolder {
     var client: NoscatClient? = null
         private set
 
+    /** This device's npub, read off the main thread once at start: even a
+     * trivial FFI getter must not run during composition, where it can
+     * stall behind the node's relay work and ANR the app. */
+    var myNpub: String? by mutableStateOf(null)
+        private set
+
     /** An active file transfer, for the progress card on the devices screen. */
     var transfer: TransferState? by mutableStateOf(null)
         private set
@@ -44,17 +52,48 @@ object ClientHolder {
         private set
 
     /**
-     * Last known mesh roster, cached across navigation: the device list
-     * and the connection pill render instantly from this while a fresh
-     * fetch (advert names over relays) runs in the background.
+     * Last known mesh roster, cached across navigation AND restarts: the
+     * device list renders from disk at startup. The FFI's member fetch
+     * does a relay advert round-trip per device, so the list must never
+     * wait on it; the (throttled) sync updates the cache in place.
      */
     var roster: List<MeshMember>? by mutableStateOf(null)
         private set
 
+    private val rosterFile: File
+        get() = File(appContext!!.filesDir, "roster.json")
+
     /** Refresh the cached roster (called after a successful member fetch). */
     fun cacheRoster(list: List<MeshMember>) {
         roster = list
+        runCatching {
+            val arr = JSONArray()
+            list.forEach { m ->
+                arr.put(JSONObject().apply {
+                    put("npub", m.npub)
+                    put("isOwner", m.isOwner)
+                    m.name?.let { put("name", it) } ?: put("name", JSONObject.NULL)
+                    m.lastSeenSecs?.let { put("lastSeenSecs", it.toLong()) }
+                        ?: put("lastSeenSecs", JSONObject.NULL)
+                })
+            }
+            rosterFile.writeText(arr.toString())
+        }
     }
+
+    private fun loadRoster(): List<MeshMember>? = runCatching {
+        val arr = JSONArray(rosterFile.readText())
+        List(arr.length()) { i ->
+            val o = arr.getJSONObject(i)
+            MeshMember(
+                npub = o.getString("npub"),
+                isOwner = o.getBoolean("isOwner"),
+                name = if (o.isNull("name")) null else o.getString("name"),
+                lastSeenSecs = if (o.isNull("lastSeenSecs")) null
+                    else o.getLong("lastSeenSecs").toULong(),
+            )
+        }
+    }.getOrNull()
 
     /** Chat history per peer npub (in memory, oldest first). */
     val chats = HashMap<String, SnapshotStateList<ChatMsg>>()
@@ -69,6 +108,17 @@ object ClientHolder {
      * reads better than a flicker. */
     val liveTunnels = mutableStateMapOf<String, Boolean>()
     private val pendingClose = HashMap<String, Runnable>()
+
+    /** When the roster last synced from the relays (epoch ms). The
+     * Devices tab throttles its automatic sync against this. */
+    var lastRosterSync = 0L
+
+    /** True once the node is listening on the relays. Until this flips,
+     * relay-backed work (advert lookups, roster sync) returns nothing:
+     * connecting to the relays can take tens of seconds, so screens must
+     * not assume a sync at app start saw anything. */
+    var nodeUp by mutableStateOf(false)
+        private set
 
     /** Total unread chat messages, for the bottom-nav badge. */
     val unreadTotal: Int get() = unread.values.sum()
@@ -101,6 +151,7 @@ object ClientHolder {
     /** Call once from the activity so transfer outcomes can toast. */
     fun init(context: Context) {
         appContext = context.applicationContext
+        roster = loadRoster()
     }
 
     /**
@@ -196,6 +247,7 @@ object ClientHolder {
                 },
             )
             client = c
+            myNpub = runCatching { c.npub() }.getOrNull()
             this.meshDir = meshDir
             logLine(
                 if (meshDir != null) "client started (mesh joined)" else "client started",
@@ -207,6 +259,7 @@ object ClientHolder {
                     try {
                         val out = outDir()
                         c.up(out, null)
+                        nodeUp = true
                         logLine("node up: files arrive in the inbox automatically")
                     } catch (t: Throwable) {
                         logLine("node failed to start: $t")
@@ -404,7 +457,12 @@ object ClientHolder {
     fun restart(secretHex: String?, meshDir: String?): NoscatClient? {
         if (client != null) logLine("client stopped")
         client = null
+        myNpub = null
+        nodeUp = false
+        lastRosterSync = 0L
         roster = null
+        // A stale persisted roster would show mesh peers while standalone.
+        runCatching { rosterFile.delete() }
         return getOrStart(secretHex, meshDir)
     }
 
