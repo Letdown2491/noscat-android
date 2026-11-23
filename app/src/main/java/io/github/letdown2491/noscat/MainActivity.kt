@@ -36,8 +36,11 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -45,6 +48,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -111,56 +117,48 @@ private fun Root(modifier: Modifier = Modifier) {
 
     if (tailnetDir != null) {
         var tab by remember { mutableStateOf("devices") }
-        Column(Modifier.fillMaxSize()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-            ) {
-                TabButton("Devices", tab == "devices") { tab = "devices" }
-                Spacer(Modifier.width(12.dp))
-                TabButton("Chat", tab == "chat") { tab = "chat" }
-            }
-            when (tab) {
-                "chat" -> ChatScreen(tailnetDir = tailnetDir!!)
-                else -> DevicesScreen(
-                    tailnetDir = tailnetDir!!,
-                    onOpenChat = { tab = "chat" },
-                    onDisconnect = {
-                        AppPrefs.setTailnetDir(context, null)
-                        scope.launch {
-                            val secret = withContext(Dispatchers.IO) {
-                                IdentityStore.load(context) ?: generateIdentity().secretHex.also {
-                                    IdentityStore.save(context, it)
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = tab == "devices",
+                        onClick = { tab = "devices" },
+                        icon = { Icon(Icons.Filled.Devices, contentDescription = null) },
+                        label = { Text("Devices") },
+                    )
+                    NavigationBarItem(
+                        selected = tab == "chat",
+                        onClick = { tab = "chat" },
+                        icon = { Icon(Icons.Filled.Chat, contentDescription = null) },
+                        label = { Text("Chat") },
+                    )
+                }
+            },
+        ) { padding ->
+            Box(Modifier.padding(padding)) {
+                when (tab) {
+                    "chat" -> ChatScreen(tailnetDir = tailnetDir!!)
+                    else -> DevicesScreen(
+                        tailnetDir = tailnetDir!!,
+                        onDisconnect = {
+                            AppPrefs.setTailnetDir(context, null)
+                            scope.launch {
+                                val secret = withContext(Dispatchers.IO) {
+                                    IdentityStore.load(context) ?: generateIdentity().secretHex.also {
+                                        IdentityStore.save(context, it)
+                                    }
                                 }
+                                withContext(Dispatchers.IO) { ClientHolder.restart(secret, null) }
+                                tailnetDir = null
                             }
-                            withContext(Dispatchers.IO) { ClientHolder.restart(secret, null) }
-                            tailnetDir = null
-                        }
-                    },
-                )
+                        },
+                    )
+                }
             }
         }
     } else {
         JoinScreen(
             onJoined = { dir -> tailnetDir = dir },
-        )
-    }
-}
-
-/** Header tab: plain text, bold when active. */
-@Composable
-private fun TabButton(label: String, active: Boolean, onClick: () -> Unit) {
-    TextButton(onClick = onClick) {
-        Text(
-            label,
-            style = MaterialTheme.typography.titleMedium,
-            color = if (active) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
         )
     }
 }
@@ -377,7 +375,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
 /** The tailnet home: devices, transfers, inbox. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DevicesScreen(tailnetDir: String, onOpenChat: () -> Unit, onDisconnect: () -> Unit) {
+private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -537,10 +535,6 @@ private fun DevicesScreen(tailnetDir: String, onOpenChat: () -> Unit, onDisconne
             onClick = { showForward = true },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Forward a service") }
-        OutlinedButton(
-            onClick = onOpenChat,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Chat") }
 
         // Inbox: inbound files land here on their own (node mode).
         Text("Inbox", style = MaterialTheme.typography.titleMedium)
