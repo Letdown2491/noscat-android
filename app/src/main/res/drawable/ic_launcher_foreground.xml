@@ -9,6 +9,15 @@
     android:height="108dp"
     android:viewportWidth="1024"
     android:viewportHeight="1024">
+    <!-- Cat head and face, scaled with the mesh on the background layer
+         (0.80 around 512,545) so the whole composition - ears inside the
+         ring, ring inside the mask - keeps the SVG's proportions inside
+         the launcher's visible circle. -->
+    <group
+        android:pivotX="512"
+        android:pivotY="545"
+        android:scaleX="0.80"
+        android:scaleY="0.80">
     <!-- cat head -->
     <path android:pathData="M512,805C330,805 238,690 238,548C238,440 262,345 282,258C345,275 425,322 462,368C492,361 532,361 562,368C599,322 679,275 742,258C762,345 786,440 786,548C786,690 694,805 512,805Z">
         <aapt:attr name="android:fillColor">
@@ -35,4 +44,5 @@ M600,545a14,14 0 1,0 28,0a14,14 0 1,0 -28,0Z" />
         android:strokeColor="#cceafcff"
         android:strokeWidth="6"
         android:fillColor="#00000000" />
+    </group>
 </vector>
