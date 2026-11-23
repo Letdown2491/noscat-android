@@ -526,7 +526,9 @@ private fun DevicesScreen(tailnetDir: String, onDisconnect: () -> Unit) {
         }
 
         // Actions
-        Text("Send to ${short(selectedNpub)}", style = MaterialTheme.typography.titleMedium)
+        val selected = findMember(members.value, selectedNpub)
+        val selectedLabel = selected?.let(::memberLabel) ?: short(selectedNpub)
+        Text("Send to $selectedLabel", style = MaterialTheme.typography.titleMedium)
         Button(
             onClick = { filePicker.launch(arrayOf("*/*")) },
             modifier = Modifier.fillMaxWidth(),
@@ -689,7 +691,7 @@ private fun DeviceCard(member: TailnetMember, selected: Boolean, onSelect: () ->
             RadioButton(selected = selected, onClick = onSelect)
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (member.isOwner) "Owner device" else "Device",
+                    memberLabel(member),
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
@@ -803,7 +805,7 @@ private fun ChatScreen(tailnetDir: String) {
                     ) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                if (m.isOwner) "Owner device" else "Device",
+                                memberLabel(m),
                                 style = MaterialTheme.typography.titleSmall,
                             )
                             Text(
@@ -822,12 +824,17 @@ private fun ChatScreen(tailnetDir: String) {
         return
     }
 
-    ConversationScreen(peer = peer, onBack = { chatting = null })
+    ConversationScreen(
+        peer = peer,
+        peerLabel = members.value?.firstOrNull { it.npub == peer }?.let(::memberLabel)
+            ?: short(peer),
+        onBack = { chatting = null },
+    )
 }
 
 /** The thread with one device: bubbles plus a send box. */
 @Composable
-private fun ConversationScreen(peer: String, onBack: () -> Unit) {
+private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
     val msgs = ClientHolder.chatWith(peer)
@@ -841,7 +848,7 @@ private fun ConversationScreen(peer: String, onBack: () -> Unit) {
         ) {
             TextButton(onClick = onBack) { Text("< Back") }
             Column {
-                Text("Chat", style = MaterialTheme.typography.titleMedium)
+                Text(peerLabel, style = MaterialTheme.typography.titleMedium)
                 Text(
                     peer.let { "${it.take(12)}...${it.takeLast(6)}" },
                     style = MaterialTheme.typography.labelSmall,
@@ -944,6 +951,15 @@ private fun ConversationScreen(peer: String, onBack: () -> Unit) {
 /** Short npub for headings: first bytes and an ellipsis. */
 private fun short(npub: String?): String =
     npub?.let { "${it.take(12)}..." } ?: "selected device"
+
+/** The best label for a device: its friendly name, else a generic one. */
+private fun memberLabel(member: TailnetMember): String =
+    member.name?.takeIf { it.isNotBlank() }
+        ?: if (member.isOwner) "Owner device" else "Device"
+
+/** Look a member up by npub in the loaded roster. */
+private fun findMember(members: List<TailnetMember>?, npub: String?): TailnetMember? =
+    members?.firstOrNull { it.npub == npub }
 
 private fun formatSize(bytes: Long): String = when {
     bytes >= 1 shl 20 -> "${bytes / (1 shl 20)} MB"

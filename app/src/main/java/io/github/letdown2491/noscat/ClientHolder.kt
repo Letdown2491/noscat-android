@@ -112,6 +112,9 @@ object ClientHolder {
                     identitySecret = secretHex,
                     relays = null,
                     tailnetDir = tailnetDir,
+                    // Peer-facing friendly name: the device model reads far
+                    // better than an npub (or Android's "localhost" hostname).
+                    deviceName = android.os.Build.MODEL.takeIf { it.isNotBlank() },
                     listenPort = null,
                 ),
                 object : EventListener {
