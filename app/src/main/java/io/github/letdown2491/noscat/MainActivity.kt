@@ -60,6 +60,8 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Lan
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -130,6 +132,12 @@ private fun Root(modifier: Modifier = Modifier) {
         // The conversation to open in the chat tab (device rows can jump
         // straight into one). null = the chat device list.
         var chatPeer by remember { mutableStateOf<String?>(null) }
+        // Files-tab badge: inbox arrivals since the tab was last open.
+        var seenInbox by remember { mutableStateOf(ClientHolder.inboxVersion) }
+        LaunchedEffect(ClientHolder.inboxVersion, tab) {
+            if (tab == "files") seenInbox = ClientHolder.inboxVersion
+        }
+        val newFiles = ClientHolder.inboxVersion - seenInbox
         Scaffold(
             bottomBar = {
                 NavigationBar {
@@ -143,7 +151,6 @@ private fun Root(modifier: Modifier = Modifier) {
                         selected = tab == "chat",
                         onClick = { tab = "chat" },
                         icon = {
-                            // Unread badge: total unread chats across peers.
                             if (ClientHolder.unreadTotal > 0) {
                                 BadgedBox(
                                     badge = {
@@ -158,6 +165,22 @@ private fun Root(modifier: Modifier = Modifier) {
                         },
                         label = { Text("Chat") },
                     )
+                    NavigationBarItem(
+                        selected = tab == "files",
+                        onClick = { tab = "files" },
+                        icon = {
+                            if (newFiles > 0) {
+                                BadgedBox(
+                                    badge = { Badge { Text("$newFiles") } },
+                                ) {
+                                    Icon(Icons.Filled.Folder, contentDescription = null)
+                                }
+                            } else {
+                                Icon(Icons.Filled.Folder, contentDescription = null)
+                            }
+                        },
+                        label = { Text("Files") },
+                    )
                 }
             },
         ) { padding ->
@@ -169,6 +192,7 @@ private fun Root(modifier: Modifier = Modifier) {
                         onOpenPeer = { chatPeer = it },
                         onChatClosed = { chatPeer = null },
                     )
+                    "files" -> FilesScreen()
                     else -> DevicesScreen(
                         tailnetDir = tailnetDir!!,
                         onOpenChat = { npub ->
@@ -407,7 +431,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
 
 // ------------------------------------------------------------- devices
 
-/** The tailnet home: devices, transfers, inbox. */
+/** The tailnet home: who is on the tailnet and what they can do. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DevicesScreen(
@@ -424,12 +448,10 @@ private fun DevicesScreen(
     val members = remember { mutableStateOf(ClientHolder.roster) }
     var selectedNpub by remember { mutableStateOf<String?>(ClientHolder.roster?.firstOrNull()?.npub) }
     var syncing by remember { mutableStateOf(false) }
-    var showForward by remember { mutableStateOf(false) }
+    // Which device the forward dialog targets (row action), or null = closed.
+    var forwardTarget by remember { mutableStateOf<String?>(null) }
     var showDiagnostics by remember { mutableStateOf(false) }
     var confirmDisconnect by remember { mutableStateOf(false) }
-
-    val transfer = ClientHolder.transfer
-    val inboxVersion = ClientHolder.inboxVersion
 
     // This phone is a tailnet member too (its device identity) - dialing
     // yourself is meaningless, so it never appears in the list.
@@ -470,10 +492,6 @@ private fun DevicesScreen(
             { ClientHolder.logLine("cannot read tailnet: ${it.message}") },
         )
     }
-
-    // The inbox re-lists whenever a transfer lands.
-    val inbox = remember { mutableStateOf(inboxFiles(context)) }
-    LaunchedEffect(inboxVersion) { inbox.value = inboxFiles(context) }
 
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -538,12 +556,123 @@ private fun DevicesScreen(
                         filePicker.launch(arrayOf("*/*"))
                     },
                     onChat = { onOpenChat(m.npub) },
+                    onForward = { forwardTarget = m.npub },
                 )
             }
         }
 
-        // Transfer progress card
-        transfer?.let { t ->
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider()
+        Row(modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = { showDiagnostics = true }) { Text("Diagnostics") }
+            Spacer(Modifier.weight(1f))
+            TextButton(
+                onClick = { confirmDisconnect = true },
+                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) { Text("Disconnect") }
+        }
+    }
+
+    if (forwardTarget != null) {
+        ForwardDialog(
+            target = forwardTarget ?: "",
+            onDismiss = { forwardTarget = null },
+        )
+    }
+
+    if (showDiagnostics) {
+        AlertDialog(
+            onDismissRequest = { showDiagnostics = false },
+            confirmButton = { Button(onClick = { showDiagnostics = false }) { Text("Close") } },
+            dismissButton = {
+                TextButton(onClick = {
+                    val cm = context.getSystemService(
+                        Context.CLIPBOARD_SERVICE,
+                    ) as ClipboardManager
+                    cm.setPrimaryClip(
+                        ClipData.newPlainText("noscat log", ClientHolder.log.joinToString("\n")),
+                    )
+                    toast(context, "log copied")
+                }) { Text("Copy log") }
+            },
+            title = { Text("Diagnostics") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Status summary first: what a support question needs.
+                    val npub = ClientHolder.client?.let {
+                        runCatching { it.npub() }.getOrNull()
+                    }
+                    val status = when {
+                        npub == null -> "not running"
+                        ClientHolder.tailnetDir != null -> "connected - ${short(npub)} (tailnet)"
+                        else -> "connected - ${short(npub)}"
+                    }
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    val lines = ClientHolder.log.take(40)
+                    if (lines.isEmpty()) {
+                        Text("no events yet")
+                    } else {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(lines) { line ->
+                                Text(line, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+            },
+        )
+    }
+    if (confirmDisconnect) {
+        AlertDialog(
+            onDismissRequest = { confirmDisconnect = false },
+            title = { Text("Disconnect from the tailnet?") },
+            text = { Text("You can rejoin later by scanning the owner's QR again.") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmDisconnect = false
+                    onDisconnect()
+                }) { Text("Disconnect") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { confirmDisconnect = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+/** Files: the inbox plus live transfer progress. */
+@Composable
+private fun FilesScreen() {
+    val context = LocalContext.current
+
+    // The inbox re-lists whenever a transfer lands (or a file is deleted).
+    val inboxVersion = ClientHolder.inboxVersion
+    val inbox = remember { mutableStateOf(inboxFiles(context)) }
+    LaunchedEffect(inboxVersion) { inbox.value = inboxFiles(context) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Files", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.weight(1f))
+            ConnectionChip(connected = ClientHolder.client != null)
+        }
+
+        // Live transfer progress (either direction).
+        ClientHolder.transfer?.let { t ->
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -573,12 +702,6 @@ private fun DevicesScreen(
                 }
             }
         }
-
-        // Actions
-        OutlinedButton(
-            onClick = { showForward = true },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Forward a service") }
 
         // Inbox: inbound files land here on their own (node mode).
         val files = inbox.value
@@ -645,87 +768,6 @@ private fun DevicesScreen(
                 }
             }
         }
-
-        Spacer(Modifier.height(8.dp))
-        HorizontalDivider()
-        Row(modifier = Modifier.fillMaxWidth()) {
-            TextButton(onClick = { showDiagnostics = true }) { Text("Diagnostics") }
-            Spacer(Modifier.weight(1f))
-            TextButton(
-                onClick = { confirmDisconnect = true },
-                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error,
-                ),
-            ) { Text("Disconnect") }
-        }
-    }
-
-    if (showForward) {
-        ForwardDialog(
-            target = selectedNpub ?: "",
-            onDismiss = { showForward = false },
-        )
-    }
-    if (showDiagnostics) {
-        AlertDialog(
-            onDismissRequest = { showDiagnostics = false },
-            confirmButton = { Button(onClick = { showDiagnostics = false }) { Text("Close") } },
-            dismissButton = {
-                TextButton(onClick = {
-                    val cm = context.getSystemService(
-                        Context.CLIPBOARD_SERVICE,
-                    ) as ClipboardManager
-                    cm.setPrimaryClip(
-                        ClipData.newPlainText("noscat log", ClientHolder.log.joinToString("\n")),
-                    )
-                    toast(context, "log copied")
-                }) { Text("Copy log") }
-            },
-            title = { Text("Diagnostics") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Status summary first: what a support question needs.
-                    val npub = ClientHolder.client?.let {
-                        runCatching { it.npub() }.getOrNull()
-                    }
-                    val status = when {
-                        npub == null -> "not running"
-                        ClientHolder.tailnetDir != null -> "connected - ${short(npub)} (tailnet)"
-                        else -> "connected - ${short(npub)}"
-                    }
-                    Text(
-                        status,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    val lines = ClientHolder.log.take(40)
-                    if (lines.isEmpty()) {
-                        Text("no events yet")
-                    } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(lines) { line ->
-                                Text(line, style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-            },
-        )
-    }
-    if (confirmDisconnect) {
-        AlertDialog(
-            onDismissRequest = { confirmDisconnect = false },
-            title = { Text("Disconnect from the tailnet?") },
-            text = { Text("You can rejoin later by scanning the owner's QR again.") },
-            confirmButton = {
-                Button(onClick = {
-                    confirmDisconnect = false
-                    onDisconnect()
-                }) { Text("Disconnect") }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { confirmDisconnect = false }) { Text("Cancel") }
-            },
-        )
     }
 }
 
@@ -770,6 +812,7 @@ private fun DeviceCard(
     onSelect: () -> Unit,
     onSend: () -> Unit,
     onChat: () -> Unit,
+    onForward: () -> Unit,
 ) {
     Card(
         onClick = onSelect,
@@ -798,8 +841,9 @@ private fun DeviceCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            // Row-level actions: send a file to (and implicitly select) this
-            // device, or jump into its chat. No "Send to ..." section needed.
+            // Row-level actions: chat, send a file (implicitly selects this
+            // device), forward one of this device's services to a local
+            // port. Everything a peer is for, one tap away.
             IconButton(onClick = onChat) {
                 Icon(
                     Icons.Filled.Chat,
@@ -811,6 +855,13 @@ private fun DeviceCard(
                 Icon(
                     Icons.Filled.AttachFile,
                     contentDescription = "Send a file to ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onForward) {
+                Icon(
+                    Icons.Filled.Lan,
+                    contentDescription = "Forward a service of ${memberLabel(member)}",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
