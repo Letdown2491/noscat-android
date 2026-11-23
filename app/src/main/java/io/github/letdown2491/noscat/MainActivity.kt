@@ -127,7 +127,6 @@ private fun Root(modifier: Modifier = Modifier) {
         )
     } else {
         JoinScreen(
-            started = started,
             onJoined = { dir -> tailnetDir = dir },
         )
     }
@@ -136,23 +135,22 @@ private fun Root(modifier: Modifier = Modifier) {
 // ---------------------------------------------------------------- join
 
 @Composable
-private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
+private fun JoinScreen(onJoined: (String) -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val dir = remember { File(context.filesDir, "tailnet") }
 
     var ownerNpub by remember { mutableStateOf<String?>(null) }
     var ownerField by remember { mutableStateOf("") }
     var deviceNpub by remember { mutableStateOf<String?>(null) }
-    var prepareError by remember { mutableStateOf<String?>(null) }
-    var joining by remember { mutableStateOf(false) }
-    var joinError by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<String?>(null) }
+    var attempt by remember { mutableStateOf(0) }
     var showAdvanced by remember { mutableStateOf(false) }
 
     val qrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
         result.contents?.let { extractNpub(it) }?.let {
             ownerNpub = it
-            prepareError = null
+            failed = false
         } ?: toast(context, "that QR does not contain a noscat npub")
     }
 
@@ -196,7 +194,7 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
                     if (np == null) toast(context, "that does not look like a npub")
                     else {
                         ownerNpub = np
-                        prepareError = null
+                        failed = false
                     }
                 },
             ) { Text("Use this owner") }
@@ -215,18 +213,43 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
         return
     }
 
-    // Step 2: publish this phone's key package (addressed to the owner) and
-    // wait for their invitation.
-    LaunchedEffect(ownerNpub) {
-        if (deviceNpub != null || prepareError != null) return@LaunchedEffect
-        val res = withContext(Dispatchers.IO) {
-            runCatching { tailnetPrepare(dir.absolutePath, ownerNpub) }
+    // Step 2: fully automatic. Publish this phone's key package (addressed to
+    // the owner) and wait for their invitation - the phone joins by itself
+    // once the owner approves. When it lands, the phone's client restarts on
+    // its tailnet device identity (the one the owner invited), so tunnels are
+    // tailnet-scoped from the first moment.
+    LaunchedEffect(ownerNpub, attempt) {
+        failed = false
+        val republish = launch {
+            while (isActive) {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        tailnetPrepare(dir.absolutePath, ownerNpub)
+                    }
+                }.onSuccess { if (deviceNpub == null) deviceNpub = it }
+                if (isActive) delay(30_000)
+            }
         }
+        val res = withContext(Dispatchers.IO) {
+            runCatching { tailnetJoin(dir.absolutePath, 180uL, ownerNpub) }
+        }
+        republish.cancel()
         res.fold(
-            { deviceNpub = it },
+            { members ->
+                AppPrefs.setTailnetDir(context, dir.absolutePath)
+                val secret = withContext(Dispatchers.IO) {
+                    File(dir, "identity.nsec").readText().trim()
+                }
+                withContext(Dispatchers.IO) {
+                    ClientHolder.restart(secret, dir.absolutePath)
+                }
+                ClientHolder.logLine("joined: ${members.size} device(s)")
+                onJoined(dir.absolutePath)
+            },
             {
-                ClientHolder.logLine("key package publish failed: $it")
-                prepareError = "${it.message}"
+                ClientHolder.logLine("join failed: $it")
+                failure = it.message
+                failed = true
             },
         )
     }
@@ -245,83 +268,36 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
             "Tailnet owner: ${ownerNpub?.take(24)}...",
             style = MaterialTheme.typography.titleSmall,
         )
-        OutlinedButton(onClick = {
-            ownerNpub = null
-            deviceNpub = null
-            prepareError = null
-        }) { Text("Change owner") }
 
-        when {
-            prepareError != null -> {
-                Text("could not reach the relays:", style = MaterialTheme.typography.bodySmall)
-                Text(prepareError!!, style = MaterialTheme.typography.bodySmall)
-                Button(onClick = {
-                    prepareError = null
-                    scope.launch {
-                        val r = withContext(Dispatchers.IO) {
-                            runCatching { tailnetPrepare(dir.absolutePath, ownerNpub) }
-                        }
-                        r.fold({ deviceNpub = it }, { prepareError = "${it.message}" })
-                    }
-                }) { Text("Retry") }
-            }
-
-            deviceNpub == null -> Text("publishing this phone's key package...", style = MaterialTheme.typography.bodySmall)
-
-            else -> {
+        if (failed) {
+            Text("join failed: $failure", style = MaterialTheme.typography.bodySmall)
+            Button(onClick = { attempt++ }) { Text("Try again") }
+            OutlinedButton(onClick = {
+                ownerNpub = null
+                deviceNpub = null
+            }) { Text("Change owner") }
+        } else {
+            Text(
+                "Waiting for the owner to approve this phone. The owner device asks to confirm this address:",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (deviceNpub == null) {
                 Text(
-                    "This phone's device address. The owner device asks you to confirm it:",
+                    "publishing this phone's key package...",
                     style = MaterialTheme.typography.bodySmall,
                 )
+            } else {
                 OutlinedButton(
                     onClick = { copy(context, deviceNpub!!) },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(deviceNpub!!, style = MaterialTheme.typography.bodySmall, maxLines = 2) }
-
-                if (joining) {
-                    Text("waiting for the invitation (up to 3 min)...", style = MaterialTheme.typography.bodySmall)
-                } else {
-                    Button(
-                        onClick = {
-                            joining = true
-                            joinError = null
-                            scope.launch {
-                                // Keep republishing while we wait: the owner's
-                                // watcher only sees key packages published
-                                // after it started, so a single publish at
-                                // screen-open is easily missed.
-                                val republish = launch {
-                                    while (isActive) {
-                                        runCatching {
-                                            withContext(Dispatchers.IO) {
-                                                tailnetPrepare(dir.absolutePath, ownerNpub)
-                                            }
-                                        }
-                                        delay(30_000)
-                                    }
-                                }
-                                val res = withContext(Dispatchers.IO) {
-                                    runCatching { tailnetJoin(dir.absolutePath, 180uL, ownerNpub) }
-                                }
-                                republish.cancel()
-                                joining = false
-                                res.fold(
-                                    { m ->
-                                        AppPrefs.setTailnetDir(context, dir.absolutePath)
-                                        ClientHolder.logLine("joined: ${m.size} device(s)")
-                                        onJoined(dir.absolutePath)
-                                    },
-                                    { joinError = it.message },
-                                )
-                            }
-                        },
-                        enabled = started,
-                    ) { Text("Join") }
-                }
-                joinError?.let {
-                    Text("join failed: $it", style = MaterialTheme.typography.bodySmall)
+                ) {
+                    Text(deviceNpub!!, style = MaterialTheme.typography.bodySmall, maxLines = 2)
                 }
             }
+            OutlinedButton(onClick = {
+                ownerNpub = null
+                deviceNpub = null
+            }) { Text("Cancel") }
         }
 
         HorizontalDivider()
