@@ -141,18 +141,86 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val dir = remember { File(context.filesDir, "tailnet") }
 
+    var ownerNpub by remember { mutableStateOf<String?>(null) }
+    var ownerField by remember { mutableStateOf("") }
     var deviceNpub by remember { mutableStateOf<String?>(null) }
     var prepareError by remember { mutableStateOf<String?>(null) }
     var joining by remember { mutableStateOf(false) }
     var joinError by remember { mutableStateOf<String?>(null) }
-    var showQr by remember { mutableStateOf(false) }
     var showAdvanced by remember { mutableStateOf(false) }
 
-    // Step 1: publish the key package so the owner can invite this phone.
-    LaunchedEffect(Unit) {
+    val qrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+        result.contents?.let { extractNpub(it) }?.let {
+            ownerNpub = it
+            prepareError = null
+        } ?: toast(context, "that QR does not contain a noscat npub")
+    }
+
+    // Step 1: the user targets a tailnet by scanning the owner's QR (the one
+    // `noscat up` prints) or pasting the owner npub. The join request is
+    // addressed to that owner, and only their invitation is accepted.
+    if (ownerNpub == null) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("noscat", style = MaterialTheme.typography.headlineMedium)
+            Text("Join a tailnet", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "Who owns your tailnet? On the owner device, the QR is printed when 'noscat up --tailnet' starts.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(onClick = {
+                qrScanner.launch(
+                    ScanOptions()
+                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                        .setPrompt("scan the owner device's QR")
+                        .setBeepEnabled(false)
+                        .setOrientationLocked(true),
+                )
+            }) { Text("Scan the owner's QR") }
+
+            OutlinedTextField(
+                value = ownerField,
+                onValueChange = { ownerField = it.trim() },
+                label = { Text("or paste the owner npub1...") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+            OutlinedButton(
+                onClick = {
+                    val np = extractNpub(ownerField)
+                    if (np == null) toast(context, "that does not look like a npub")
+                    else {
+                        ownerNpub = np
+                        prepareError = null
+                    }
+                },
+            ) { Text("Use this owner") }
+
+            HorizontalDivider()
+            OutlinedButton(onClick = { showAdvanced = true }) { Text("Advanced") }
+        }
+        if (showAdvanced) {
+            AdvancedDialog(
+                joined = false,
+                onDismiss = { showAdvanced = false },
+                onJoinedByImport = { dir -> onJoined(dir) },
+                onForget = {},
+            )
+        }
+        return
+    }
+
+    // Step 2: publish this phone's key package (addressed to the owner) and
+    // wait for their invitation.
+    LaunchedEffect(ownerNpub) {
         if (deviceNpub != null || prepareError != null) return@LaunchedEffect
         val res = withContext(Dispatchers.IO) {
-            runCatching { tailnetPrepare(dir.absolutePath) }
+            runCatching { tailnetPrepare(dir.absolutePath, ownerNpub) }
         }
         res.fold(
             { deviceNpub = it },
@@ -173,6 +241,16 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
         Text("noscat", style = MaterialTheme.typography.headlineMedium)
         Text("Join a tailnet", style = MaterialTheme.typography.titleLarge)
 
+        Text(
+            "Tailnet owner: ${ownerNpub?.take(24)}...",
+            style = MaterialTheme.typography.titleSmall,
+        )
+        OutlinedButton(onClick = {
+            ownerNpub = null
+            deviceNpub = null
+            prepareError = null
+        }) { Text("Change owner") }
+
         when {
             prepareError != null -> {
                 Text("could not reach the relays:", style = MaterialTheme.typography.bodySmall)
@@ -181,7 +259,7 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
                     prepareError = null
                     scope.launch {
                         val r = withContext(Dispatchers.IO) {
-                            runCatching { tailnetPrepare(dir.absolutePath) }
+                            runCatching { tailnetPrepare(dir.absolutePath, ownerNpub) }
                         }
                         r.fold({ deviceNpub = it }, { prepareError = "${it.message}" })
                     }
@@ -192,20 +270,13 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
 
             else -> {
                 Text(
-                    "This phone's device address. Invite it from the device that owns your tailnet:",
+                    "This phone's device address. The owner device asks you to confirm it:",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedButton(
                     onClick = { copy(context, deviceNpub!!) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(deviceNpub!!, style = MaterialTheme.typography.bodySmall, maxLines = 2) }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { showQr = true }) { Text("Show QR") }
-                }
-                Text(
-                    "Tap Join, then accept this phone on the owner device when it asks. It must be running 'noscat up --tailnet'.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
 
                 if (joining) {
                     Text("waiting for the invitation (up to 3 min)...", style = MaterialTheme.typography.bodySmall)
@@ -223,14 +294,14 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
                                     while (isActive) {
                                         runCatching {
                                             withContext(Dispatchers.IO) {
-                                                tailnetPrepare(dir.absolutePath)
+                                                tailnetPrepare(dir.absolutePath, ownerNpub)
                                             }
                                         }
                                         delay(30_000)
                                     }
                                 }
                                 val res = withContext(Dispatchers.IO) {
-                                    runCatching { tailnetJoin(dir.absolutePath, 180uL) }
+                                    runCatching { tailnetJoin(dir.absolutePath, 180uL, ownerNpub) }
                                 }
                                 republish.cancel()
                                 joining = false
@@ -257,9 +328,6 @@ private fun JoinScreen(started: Boolean, onJoined: (String) -> Unit) {
         OutlinedButton(onClick = { showAdvanced = true }) { Text("Advanced") }
     }
 
-    if (showQr && deviceNpub != null) {
-        QrDialog(deviceNpub!!, onDismiss = { showQr = false })
-    }
     if (showAdvanced) {
         AdvancedDialog(
             joined = false,
