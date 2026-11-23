@@ -896,76 +896,84 @@ private fun DeviceCard(
     onForward: () -> Unit,
 ) {
     val context = LocalContext.current
+    val copyNpub = {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+            as android.content.ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("npub", member.npub))
+        toast(context, "npub copied")
+    }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-            // Row 1: the device's identity.
-            Text(
-                memberLabel(member),
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-            // Row 2: everything a peer is for, one tap away: chat, share
-            // this phone's clipboard, send a file, forward one of this
-            // device's services, copy the npub (no more truncated lines).
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onChat) {
-                    Icon(
-                        Icons.Filled.Chat,
-                        contentDescription = "Chat with ${memberLabel(member)}",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            // The name is the npub copy affordance: tap it (or the little
+            // copy glyph beside it) and the full npub is on the clipboard.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = copyNpub),
+            ) {
+                Text(
+                    memberLabel(member),
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Icon(
+                    Icons.Filled.ContentCopy,
+                    contentDescription = "Copy the npub of ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .size(14.dp),
+                )
+            }
+            // Row-level actions: chat, share this phone's clipboard, send
+            // a file, forward one of this device's services.
+            IconButton(onClick = onChat) {
+                Icon(
+                    Icons.Filled.Chat,
+                    contentDescription = "Chat with ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
+                    as android.content.ClipboardManager
+                val text = cm.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+                if (text.isNullOrEmpty()) {
+                    toast(context, "clipboard is empty")
+                } else {
+                    ClientHolder.sendClipboard(member.npub, text)
+                    toast(context, "clipboard sent to ${memberLabel(member)}")
                 }
-                IconButton(onClick = {
-                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                        as android.content.ClipboardManager
-                    val text = cm.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
-                    if (text.isNullOrEmpty()) {
-                        toast(context, "clipboard is empty")
-                    } else {
-                        ClientHolder.sendClipboard(member.npub, text)
-                        toast(context, "clipboard sent to ${memberLabel(member)}")
-                    }
-                }) {
-                    Icon(
-                        Icons.Filled.ContentPaste,
-                        contentDescription = "Paste this phone's clipboard to ${memberLabel(member)}",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = onSend) {
-                    Icon(
-                        Icons.Filled.AttachFile,
-                        contentDescription = "Send a file to ${memberLabel(member)}",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = onForward) {
-                    Icon(
-                        Icons.Filled.Lan,
-                        contentDescription = "Forward a service of ${memberLabel(member)}",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = {
-                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
-                        as android.content.ClipboardManager
-                    cm.setPrimaryClip(
-                        ClipData.newPlainText("npub", member.npub),
-                    )
-                    toast(context, "npub copied")
-                }) {
-                    Icon(
-                        Icons.Filled.ContentCopy,
-                        contentDescription = "Copy the npub of ${memberLabel(member)}",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            }) {
+                Icon(
+                    Icons.Filled.ContentPaste,
+                    contentDescription = "Paste this phone's clipboard to ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onSend) {
+                Icon(
+                    Icons.Filled.AttachFile,
+                    contentDescription = "Send a file to ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onForward) {
+                Icon(
+                    Icons.Filled.Lan,
+                    contentDescription = "Forward a service of ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
