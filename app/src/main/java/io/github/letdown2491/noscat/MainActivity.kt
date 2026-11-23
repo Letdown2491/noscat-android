@@ -914,6 +914,8 @@ private fun DeviceCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
+            PresenceDot(live = ClientHolder.liveTunnels[member.npub] == true)
+            Spacer(Modifier.width(6.dp))
             // The name is the npub copy affordance: tap it and the full
             // npub is on the clipboard.
             Text(
@@ -965,12 +967,9 @@ private fun DeviceCard(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.width(6.dp))
-            PresenceDot(live = ClientHolder.liveTunnels[member.npub] == true)
         }
     }
 }
-
 /** Live-tunnel presence dot: green while a tunnel to that peer is up
  * (the same signal the Files tab's transfer card shows, per device). */
 @Composable
@@ -1144,6 +1143,8 @@ private fun ChatScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
+                            PresenceDot(live = ClientHolder.liveTunnels[m.npub] == true)
+                            Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     memberLabel(m),

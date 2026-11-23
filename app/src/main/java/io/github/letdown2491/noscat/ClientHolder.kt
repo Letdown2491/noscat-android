@@ -63,8 +63,12 @@ object ClientHolder {
     val unread = mutableStateMapOf<String, Int>()
 
     /** Peers with a live tunnel right now (Compose observable). The
-     * presence dot on the device and chat rows reads this. */
+     * presence dot on the device and chat rows reads this. One-shot
+     * tunnels (chat, file sends) blink up and down in a moment, so a
+     * close only clears the dot a minute later: "reached recently"
+     * reads better than a flicker. */
     val liveTunnels = mutableStateMapOf<String, Boolean>()
+    private val pendingClose = HashMap<String, Runnable>()
 
     /** Total unread chat messages, for the bottom-nav badge. */
     val unreadTotal: Int get() = unread.values.sum()
@@ -238,8 +242,19 @@ object ClientHolder {
                 chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
                 unread[event.peer] = (unread[event.peer] ?: 0) + 1
             }
-            is Event.TunnelUp -> liveTunnels[event.peer] = true
-            is Event.TunnelClosed -> liveTunnels[event.peer] = false
+            is Event.TunnelUp -> {
+                pendingClose.remove(event.peer)?.let { main.removeCallbacks(it) }
+                liveTunnels[event.peer] = true
+            }
+            is Event.TunnelClosed -> {
+                pendingClose.remove(event.peer)?.let { main.removeCallbacks(it) }
+                val clear = Runnable {
+                    pendingClose.remove(event.peer)
+                    liveTunnels[event.peer] = false
+                }
+                pendingClose[event.peer] = clear
+                main.postDelayed(clear, 60_000)
+            }
             is Event.Clipboard -> {
                 // A peer shared their clipboard: it becomes ours. This is
                 // the receiving end of the row "paste" action.
