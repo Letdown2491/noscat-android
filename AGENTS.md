@@ -53,12 +53,15 @@ layer stays native Kotlin instead of a cross-platform framework.
   roster cache, chat history, unread counts, and transfer state as Compose
   snapshot state.
   The roster persists to `filesDir/roster.json` so startup renders the
-  device list instantly. Devices refresh themselves while the tab is on
-  screen (every 2 minutes) and once when the node starts listening on
-  the relays (a sync before that sees nothing); tab switches never hit
-  the network, and pull to refresh forces a sync any time. `meshSync`
-  returns membership only; the sync enriches it with `meshMembers`
-  for advert names and presence (`lastSeenSecs`, green/red dot).
+  device list instantly. Devices refresh themselves: `ClientHolder`
+  syncs on a 2 minute timer for the life of the client, plus once when
+  the node starts listening on the relays (a sync before that sees
+  nothing); tab switches never hit the network, and pull to refresh
+  forces a sync any time. `meshSync` returns membership only; the sync
+  enriches it with `meshMembers` for advert names and presence
+  (`lastSeenSecs`, green/red dot). A per-device advert fetch can come
+  back empty (relays are flaky), so a sync keeps the previous name and
+  presence, aged forward, instead of flashing a live peer red.
 - `scripts/build-native.sh` - cross-compiles the `noscat-ffi` crate
   for arm64, strips the .so into `app/src/main/jniLibs/`, and regenerates the
   Kotlin bindings. `local` builds the `~/Documents/noscat` checkout.

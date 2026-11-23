@@ -5,10 +5,14 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import org.json.JSONArray
 import org.json.JSONObject
 import androidx.compose.runtime.getValue
 import uniffi.noscat.MeshMember
+import uniffi.noscat.meshMembers
+import uniffi.noscat.meshSync
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,9 +67,14 @@ object ClientHolder {
     private val rosterFile: File
         get() = File(appContext!!.filesDir, "roster.json")
 
+    /** Epoch ms when [roster]'s lastSeenSecs were measured (persisted
+     * alongside the roster), so cached presence can be aged forward. */
+    private var rosterAgeBase = 0L
+
     /** Refresh the cached roster (called after a successful member fetch). */
     fun cacheRoster(list: List<MeshMember>) {
         roster = list
+        rosterAgeBase = System.currentTimeMillis()
         runCatching {
             val arr = JSONArray()
             list.forEach { m ->
@@ -77,23 +86,119 @@ object ClientHolder {
                         ?: put("lastSeenSecs", JSONObject.NULL)
                 })
             }
-            rosterFile.writeText(arr.toString())
+            rosterFile.writeText(
+                JSONObject().apply {
+                    put("fetchedAt", rosterAgeBase)
+                    put("members", arr)
+                }.toString(),
+            )
         }
     }
 
     private fun loadRoster(): List<MeshMember>? = runCatching {
-        val arr = JSONArray(rosterFile.readText())
+        val o = JSONObject(rosterFile.readText())
+        rosterAgeBase = o.optLong("fetchedAt", 0L)
+        val arr = o.getJSONArray("members")
         List(arr.length()) { i ->
-            val o = arr.getJSONObject(i)
+            val m = arr.getJSONObject(i)
             MeshMember(
-                npub = o.getString("npub"),
-                isOwner = o.getBoolean("isOwner"),
-                name = if (o.isNull("name")) null else o.getString("name"),
-                lastSeenSecs = if (o.isNull("lastSeenSecs")) null
-                    else o.getLong("lastSeenSecs").toULong(),
+                npub = m.getString("npub"),
+                isOwner = m.getBoolean("isOwner"),
+                name = if (m.isNull("name")) null else m.getString("name"),
+                lastSeenSecs = if (m.isNull("lastSeenSecs")) null
+                    else m.getLong("lastSeenSecs").toULong(),
             )
         }
     }.getOrNull()
+
+    /** True while a roster sync runs, for the pull-to-refresh spinner. */
+    var syncing by mutableStateOf(false)
+        private set
+
+    /** Serializes roster syncs and invalidates the refresh loop of a
+     * stopped client. */
+    private val syncGen = AtomicInteger(0)
+    private val syncBusy = AtomicBoolean(false)
+
+    /**
+     * Sync the roster from the relays: meshSync for membership, then the
+     * per-device advert fetch (names, lastSeenSecs presence) that
+     * meshSync skips. Runs on its own thread; UI just observes [roster].
+     * Cheap no-op when nothing is running or a sync is already out.
+     */
+    fun syncRoster(waitSecs: ULong = 5uL) {
+        val dir = meshDir ?: return
+        if (!syncBusy.compareAndSet(false, true)) return
+        val gen = syncGen.get()
+        syncing = true
+        Thread {
+            val res = runCatching { meshSync(dir, waitSecs) }
+                // meshSync returns membership only (no advert data);
+                // enrich with names and presence from the per-device
+                // advert fetch, keeping the membership from meshSync on
+                // the rare failure.
+                .mapCatching { synced ->
+                    runCatching { meshMembers(dir) }
+                        .onSuccess { l ->
+                            logLine(
+                                "enriched ${l.count { it.name != null }}/" +
+                                    "${l.size} member adverts",
+                            )
+                        }
+                        .getOrDefault(synced)
+                }
+            syncBusy.set(false)
+            syncing = false
+            res.fold(
+                { fetched ->
+                    // A relay fetch can come back empty for a peer (no
+                    // name, no presence). Keep the previous values for
+                    // that peer, aging the presence forward, so one
+                    // missed lookup does not flash a live peer red under
+                    // a generic label. A dead peer still goes red on its
+                    // own: the aged lastSeenSecs crosses the advert TTL.
+                    val prev = roster
+                    val elapsedSecs =
+                        ((System.currentTimeMillis() - rosterAgeBase)
+                            .coerceAtLeast(0) / 1000).toULong()
+                    val merged = fetched.map { m ->
+                        val p = prev?.firstOrNull { it.npub == m.npub }
+                        if (p != null && m.name == null && m.lastSeenSecs == null) {
+                            p.copy(
+                                npub = m.npub,
+                                isOwner = m.isOwner,
+                                lastSeenSecs = p.lastSeenSecs?.let { it + elapsedSecs },
+                            )
+                        } else {
+                            m
+                        }
+                    }
+                    roster = merged.filter { it.npub != myNpub }
+                    cacheRoster(roster!!)
+                },
+                { if (gen == syncGen.get()) logLine("sync failed: ${it.message}") },
+            )
+        }.start()
+    }
+
+    /**
+     * Refresh the roster on a timer for as long as this client runs.
+     * Never tied to navigation: screens observe [roster], so freshness
+     * arrives whether or not a list is on screen. One sync fires as
+     * soon as the node listens (a sync before that sees nothing).
+     */
+    private fun startRosterSyncLoop() {
+        val gen = syncGen.incrementAndGet()
+        Thread {
+            try {
+                while (syncGen.get() == gen) {
+                    if (nodeUp) syncRoster()
+                    Thread.sleep(120_000)
+                }
+            } catch (_: InterruptedException) {
+            }
+        }.apply { isDaemon = true; start() }
+    }
 
     /** Chat history per peer npub (in memory, oldest first). */
     val chats = HashMap<String, SnapshotStateList<ChatMsg>>()
@@ -256,6 +361,7 @@ object ClientHolder {
                         val out = outDir()
                         c.up(out, null)
                         nodeUp = true
+                        startRosterSyncLoop()
                         logLine("node up: files arrive in the inbox automatically")
                     } catch (t: Throwable) {
                         logLine("node failed to start: $t")
@@ -452,9 +558,11 @@ object ClientHolder {
     @Synchronized
     fun restart(secretHex: String?, meshDir: String?): NoscatClient? {
         if (client != null) logLine("client stopped")
+        syncGen.incrementAndGet() // stop any roster sync loop
         client = null
         myNpub = null
         nodeUp = false
+        syncing = false
         roster = null
         // A stale persisted roster would show mesh peers while standalone.
         runCatching { rosterFile.delete() }

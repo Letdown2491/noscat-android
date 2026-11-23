@@ -515,62 +515,14 @@ private fun DevicesScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Seed from the cached roster so revisiting this tab is instant: the
-    // device list and the pill render immediately, and the fetch below only
-    // refreshes names (advert lookups over relays take a moment).
-    val members = remember { mutableStateOf(ClientHolder.roster) }
+    // The roster lives in ClientHolder (persisted, synced on a timer in
+    // the background, self-filtered of this phone). This screen only
+    // observes it; tab switches never trigger anything.
+    val members = ClientHolder.roster
     // Which device row launched the file picker (send target).
     var sendTarget by remember { mutableStateOf<String?>(null) }
-    var syncing by remember { mutableStateOf(false) }
     // Which device the forward dialog targets (row action), or null = closed.
     var forwardTarget by remember { mutableStateOf<String?>(null) }
-
-    // This phone is a mesh member too (its device identity) - dialing
-    // yourself is meaningless, so it never appears in the list.
-    val myNpub = ClientHolder.myNpub
-    fun others(list: List<MeshMember>) = list.filter { it.npub != myNpub }
-
-    /** Sync the roster from the relays: pull to refresh and the freshness
-     * timer below are the only callers. Tab switches never hit the
-     * network; the list renders from the persisted roster. */
-    fun syncDevices(waitSecs: ULong) {
-        scope.launch {
-            syncing = true
-            val res = withContext(Dispatchers.IO) {
-                runCatching { meshSync(meshDir, waitSecs) }
-                    // meshSync returns membership only (no advert data);
-                    // enrich with names and presence from the per-device
-                    // advert fetch. Slow is fine: this is the background
-                    // sync, and the list renders from the roster meanwhile.
-                    .mapCatching { synced ->
-                        runCatching { meshMembers(meshDir) }.getOrDefault(synced)
-                    }
-            }
-            syncing = false
-            res.fold(
-                { list ->
-                    val visible = others(list)
-                    members.value = visible
-                    ClientHolder.cacheRoster(visible)
-                },
-                { ClientHolder.logLine("sync failed: ${it.message}") },
-            )
-        }
-    }
-
-    // Freshness while this tab is on screen: the list refreshes itself on
-    // a timer, so tab switches cost nothing. The first sync fires when
-    // the node comes up (below), not on entering the tab; a sync before
-    // the relays are connected would see nothing anyway.
-    LaunchedEffect(meshDir) {
-        while (true) {
-            delay(ROSTER_SYNC_PERIOD_MS)
-            syncDevices(5uL)
-        }
-    }
-    LaunchedEffect(ClientHolder.nodeUp) {
-        if (ClientHolder.nodeUp) syncDevices(5uL)
-    }
 
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -588,10 +540,10 @@ private fun DevicesScreen(
         }
     }
 
-    // Pull down to refresh: the manual override for the automatic sync.
+    // Pull down to refresh: the manual override for the background sync.
     PullToRefreshBox(
-        isRefreshing = syncing,
-        onRefresh = { syncDevices(5uL) },
+        isRefreshing = ClientHolder.syncing,
+        onRefresh = { ClientHolder.syncRoster() },
         modifier = Modifier.fillMaxSize(),
     ) {
     Column(
@@ -609,7 +561,7 @@ private fun DevicesScreen(
             ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
         }
 
-        val list = members.value
+        val list = members
         when {
             list == null -> Text(
                 "loading devices...",
@@ -1109,11 +1061,6 @@ private fun DeviceCard(
  * on this timer, so an advert younger than the TTL means the peer is up. */
 private const val ADVERT_TTL_SECS: ULong = 3600uL
 
-/** How often the Devices tab refreshes itself while it is on screen.
- * Tab switches never sync; nothing else needs this cadence either, the
- * presence dot's advert TTL is an hour. */
-private const val ROSTER_SYNC_PERIOD_MS = 120_000L
-
 /** Online per the mesh presence: the peer's advert is fresh. */
 private fun MeshMember.online(): Boolean =
     lastSeenSecs?.let { it < ADVERT_TTL_SECS } ?: false
@@ -1248,11 +1195,9 @@ private fun ChatScreen(
 ) {
     val myNpub = ClientHolder.myNpub
 
-    // Seed from the persisted roster so switching tabs renders instantly.
-    // No fetch here: the Devices tab's sync owns the roster, and the
-    // FFI's member fetch costs a relay round-trip per device.
-    val members = remember { mutableStateOf(ClientHolder.roster) }
-    LaunchedEffect(ClientHolder.roster) { members.value = ClientHolder.roster }
+    // The roster lives in ClientHolder (persisted, synced on a timer in
+    // the background). No fetch here, just observation.
+    val members = ClientHolder.roster
 
     val peer = openPeer
     if (peer == null) {
@@ -1271,7 +1216,7 @@ private fun ChatScreen(
                 Spacer(Modifier.weight(1f))
                 ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
             }
-            val list = members.value
+            val list = members
             when {
                 list == null -> Text(
                     "loading devices...",
@@ -1296,10 +1241,6 @@ private fun ChatScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
-                            PresenceDot(
-                                live = m.online() || ClientHolder.liveTunnels[m.npub] == true,
-                            )
-                            Spacer(Modifier.width(8.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     memberLabel(m),
@@ -1314,25 +1255,18 @@ private fun ChatScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                PresenceDot(
-                                    live = ClientHolder.liveTunnels[m.npub] == true,
+                            // Unread marker only: presence dots live on
+                            // the Devices list. Here a colored dot reads
+                            // as "new message", so anything else misleads.
+                            if ((ClientHolder.unread[m.npub] ?: 0) > 0) {
+                                Box(
+                                    Modifier
+                                        .size(10.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.primary,
+                                            CircleShape,
+                                        ),
                                 )
-                                if ((ClientHolder.unread[m.npub] ?: 0) > 0) {
-                                    // Something arrived since the conversation
-                                    // was last on screen.
-                                    Box(
-                                        Modifier
-                                            .size(10.dp)
-                                            .background(
-                                                MaterialTheme.colorScheme.primary,
-                                                CircleShape,
-                                            ),
-                                    )
-                                }
                             }
                         }
                     }
@@ -1344,7 +1278,7 @@ private fun ChatScreen(
 
     ConversationScreen(
         peer = peer,
-        peerLabel = members.value?.firstOrNull { it.npub == peer }?.let(::memberLabel)
+        peerLabel = members?.firstOrNull { it.npub == peer }?.let(::memberLabel)
             ?: short(peer),
         onBack = onChatClosed,
     )
@@ -1497,10 +1431,6 @@ private fun short(npub: String?): String =
 private fun memberLabel(member: MeshMember): String =
     member.name?.takeIf { it.isNotBlank() }
         ?: if (member.isOwner) "Owner device" else "Device"
-
-/** Look a member up by npub in the loaded roster. */
-private fun findMember(members: List<MeshMember>?, npub: String?): MeshMember? =
-    members?.firstOrNull { it.npub == npub }
 
 private fun formatSize(bytes: Long): String = when {
     bytes >= 1 shl 20 -> "${bytes / (1 shl 20)} MB"
