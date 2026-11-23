@@ -5,20 +5,21 @@ mesh VPN. Native Kotlin (Compose) over a Rust UniFFI bridge; the protocol lives 
 the noscat workspace (`noscat-core`/`noscat-client`/`noscat-ffi`), so this repo
 contains no protocol code.
 
-Status: phase 1 in progress - a remote-reach client (dial `forward` tunnels to peers,
-send and receive files, join the owner's tailnet). Roadmap and agent guidance in
-[AGENTS.md](AGENTS.md).
+Status: phase 1 in progress - a remote-reach client: chat, file send/receive,
+port forwards to a peer's services, and joining the owner's mesh by invite.
+Roadmap and agent guidance in [AGENTS.md](AGENTS.md).
 
 ## Building
 
 Two steps: the native bridge, then the app.
 
-1. Native bridge (cross-compiles the published `noscat-ffi` crate in the podman
+1. Native bridge (cross-compiles the `noscat-ffi` crate in the podman
    container, mounts the host Android NDK, strips the .so into
    `app/src/main/jniLibs/`, and regenerates the Kotlin bindings):
 
    ```
-   ./scripts/build-native.sh [version]   # default: noscat-ffi 0.2.0
+   ./scripts/build-native.sh local    # build from the ~/Documents/noscat checkout
+   ./scripts/build-native.sh 0.3.0    # or cross-compile a published version
    ```
 
 2. The app itself (needs the JDK 21 tarball in `~/opt`):
