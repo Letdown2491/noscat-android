@@ -160,7 +160,9 @@ object ClientHolder {
                     meshDir = meshDir,
                     // Peer-facing friendly name: the device model reads far
                     // better than an npub (or Android's "localhost" hostname).
-                    deviceName = android.os.Build.MODEL.takeIf { it.isNotBlank() },
+                    deviceName = AppPrefs.deviceName(appContext!!)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: android.os.Build.MODEL.takeIf { it.isNotBlank() },
                     listenPort = null,
                 ),
                 object : EventListener {
@@ -316,6 +318,18 @@ object ClientHolder {
         client = null
         roster = null
         return getOrStart(secretHex, meshDir)
+    }
+
+    /**
+     * Restart on the config prefs currently hold (identity, mesh, device
+     * name) - for changes that only apply at client start, like a rename.
+     */
+    @Synchronized
+    fun restartFromPrefs(context: Context): NoscatClient? {
+        if (client != null) logLine("client stopped")
+        client = null
+        roster = null
+        return startFromPrefs(context)
     }
 
     fun render(event: Event): String = when (event) {

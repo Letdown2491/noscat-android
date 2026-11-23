@@ -41,9 +41,11 @@ layer stays native Kotlin instead of a cross-platform framework.
 ## Layout
 
 - `app/` - the Android app. `MainActivity.kt` holds the screens: the join flow
-  (mesh invite by QR), and a three-tab layout: Devices (roster with per-row
-  chat / send-file / forward actions, diagnostics, disconnect), Chat
-  (conversation list and bubbles), Files (inbox plus live transfer progress).
+  (mesh invite by QR), and a four-tab layout: Devices (roster with per-row
+  chat / send-file / forward actions), Chat (conversation list and bubbles),
+  Files (inbox plus live transfer progress), Settings (status, device name,
+  diagnostics). Disconnect lives on the connection chip itself (click it, on
+  any tab's header) plus a button in Settings, both behind a confirm dialog.
   `ClientHolder.kt` owns the running client and exposes client lifetime,
   roster cache, chat history, unread counts, and transfer state as Compose
   snapshot state.

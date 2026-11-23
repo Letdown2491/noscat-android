@@ -81,4 +81,16 @@ object AppPrefs {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_MESH, path).commit()
     }
+
+    private const val KEY_DEVICE_NAME = "device_name"
+
+    /** The user-chosen device name, or null (fall back to the model). */
+    fun deviceName(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_DEVICE_NAME, null)
+
+    fun setDeviceName(context: Context, name: String?) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_DEVICE_NAME, name).commit()
+    }
 }

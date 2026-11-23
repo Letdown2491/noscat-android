@@ -37,6 +37,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +63,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -138,6 +140,20 @@ private fun Root(modifier: Modifier = Modifier) {
             if (tab == "files") seenInbox = ClientHolder.inboxVersion
         }
         val newFiles = ClientHolder.inboxVersion - seenInbox
+        // Leave the mesh: forget the join, restart standalone, and drop
+        // back to the join flow. Shared by every screen's chip.
+        val disconnect: () -> Unit = {
+            AppPrefs.setMeshDir(context, null)
+            scope.launch {
+                val secret = withContext(Dispatchers.IO) {
+                    IdentityStore.load(context) ?: generateIdentity().secretHex.also {
+                        IdentityStore.save(context, it)
+                    }
+                }
+                withContext(Dispatchers.IO) { ClientHolder.restart(secret, null) }
+                meshDir = null
+            }
+        }
         Scaffold(
             bottomBar = {
                 NavigationBar {
@@ -181,6 +197,12 @@ private fun Root(modifier: Modifier = Modifier) {
                         },
                         label = { Text("Files") },
                     )
+                    NavigationBarItem(
+                        selected = tab == "settings",
+                        onClick = { tab = "settings" },
+                        icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                        label = { Text("Settings") },
+                    )
                 }
             },
         ) { padding ->
@@ -192,25 +214,15 @@ private fun Root(modifier: Modifier = Modifier) {
                         onOpenPeer = { chatPeer = it },
                         onChatClosed = { chatPeer = null },
                     )
-                    "files" -> FilesScreen()
+                    "files" -> FilesScreen(onDisconnect = disconnect)
+                    "settings" -> SettingsScreen(onDisconnect = disconnect)
                     else -> DevicesScreen(
                         meshDir = meshDir!!,
                         onOpenChat = { npub ->
                             chatPeer = npub
                             tab = "chat"
                         },
-                        onDisconnect = {
-                            AppPrefs.setMeshDir(context, null)
-                            scope.launch {
-                                val secret = withContext(Dispatchers.IO) {
-                                    IdentityStore.load(context) ?: generateIdentity().secretHex.also {
-                                        IdentityStore.save(context, it)
-                                    }
-                                }
-                                withContext(Dispatchers.IO) { ClientHolder.restart(secret, null) }
-                                meshDir = null
-                            }
-                        },
+                        onDisconnect = disconnect,
                     )
                 }
             }
@@ -452,8 +464,6 @@ private fun DevicesScreen(
     var syncing by remember { mutableStateOf(false) }
     // Which device the forward dialog targets (row action), or null = closed.
     var forwardTarget by remember { mutableStateOf<String?>(null) }
-    var showDiagnostics by remember { mutableStateOf(false) }
-    var confirmDisconnect by remember { mutableStateOf(false) }
 
     // This phone is a mesh member too (its device identity) - dialing
     // yourself is meaningless, so it never appears in the list.
@@ -522,7 +532,7 @@ private fun DevicesScreen(
         ) {
             Text("noscat", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
-            ConnectionChip(connected = ClientHolder.client != null)
+            ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
         }
 
         // Devices
@@ -562,19 +572,6 @@ private fun DevicesScreen(
                 )
             }
         }
-
-        Spacer(Modifier.height(8.dp))
-        HorizontalDivider()
-        Row(modifier = Modifier.fillMaxWidth()) {
-            TextButton(onClick = { showDiagnostics = true }) { Text("Diagnostics") }
-            Spacer(Modifier.weight(1f))
-            TextButton(
-                onClick = { confirmDisconnect = true },
-                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error,
-                ),
-            ) { Text("Disconnect") }
-        }
     }
 
     if (forwardTarget != null) {
@@ -583,73 +580,11 @@ private fun DevicesScreen(
             onDismiss = { forwardTarget = null },
         )
     }
-
-    if (showDiagnostics) {
-        AlertDialog(
-            onDismissRequest = { showDiagnostics = false },
-            confirmButton = { Button(onClick = { showDiagnostics = false }) { Text("Close") } },
-            dismissButton = {
-                TextButton(onClick = {
-                    val cm = context.getSystemService(
-                        Context.CLIPBOARD_SERVICE,
-                    ) as ClipboardManager
-                    cm.setPrimaryClip(
-                        ClipData.newPlainText("noscat log", ClientHolder.log.joinToString("\n")),
-                    )
-                    toast(context, "log copied")
-                }) { Text("Copy log") }
-            },
-            title = { Text("Diagnostics") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Status summary first: what a support question needs.
-                    val npub = ClientHolder.client?.let {
-                        runCatching { it.npub() }.getOrNull()
-                    }
-                    val status = when {
-                        npub == null -> "not running"
-                        ClientHolder.meshDir != null -> "connected - ${short(npub)} (mesh)"
-                        else -> "connected - ${short(npub)}"
-                    }
-                    Text(
-                        status,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    val lines = ClientHolder.log.take(40)
-                    if (lines.isEmpty()) {
-                        Text("no events yet")
-                    } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(lines) { line ->
-                                Text(line, style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-            },
-        )
-    }
-    if (confirmDisconnect) {
-        AlertDialog(
-            onDismissRequest = { confirmDisconnect = false },
-            title = { Text("Disconnect from the mesh?") },
-            text = { Text("You can rejoin later by scanning the owner's QR again.") },
-            confirmButton = {
-                Button(onClick = {
-                    confirmDisconnect = false
-                    onDisconnect()
-                }) { Text("Disconnect") }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { confirmDisconnect = false }) { Text("Cancel") }
-            },
-        )
-    }
 }
 
 /** Files: the inbox plus live transfer progress. */
 @Composable
-private fun FilesScreen() {
+private fun FilesScreen(onDisconnect: () -> Unit) {
     val context = LocalContext.current
 
     // The inbox re-lists whenever a transfer lands (or a file is deleted).
@@ -670,7 +605,7 @@ private fun FilesScreen() {
         ) {
             Text("Files", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
-            ConnectionChip(connected = ClientHolder.client != null)
+            ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
         }
 
         // Live transfer progress (either direction).
@@ -773,9 +708,143 @@ private fun FilesScreen() {
     }
 }
 
-/** Connected indicator in the top bar. */
+/**
+ * Settings: connection status, device name, and the diagnostics log -
+ * the app plumbing the content tabs don't show. Disconnect lives on the
+ * connection chip (click it), not here.
+ */
 @Composable
-private fun ConnectionChip(connected: Boolean) {
+private fun SettingsScreen(onDisconnect: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var confirmDisconnect by remember { mutableStateOf(false) }
+
+    // Device name: what peers see in their rosters and chats. Empty falls
+    // back to the phone model. Saving restarts the node to re-advertise.
+    val currentName = AppPrefs.deviceName(context)
+        ?: android.os.Build.MODEL.takeIf { it.isNotBlank() }
+        ?: ""
+    var nameField by remember { mutableStateOf(currentName) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Settings", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.weight(1f))
+            ConnectionChip(
+                connected = ClientHolder.client != null,
+                onDisconnect = onDisconnect,
+            )
+        }
+
+        // Connection: the one-line status a support question starts with.
+        val npub = ClientHolder.client?.let { runCatching { it.npub() }.getOrNull() }
+        val status = when {
+            npub == null -> "not running"
+            ClientHolder.meshDir != null -> "connected as ${short(npub)} (mesh)"
+            else -> "connected as ${short(npub)}"
+        }
+        Text(status, style = MaterialTheme.typography.bodyMedium)
+
+        // Device name.
+        Text("Device name", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = nameField,
+                onValueChange = { nameField = it },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    AppPrefs.setDeviceName(context, nameField.trim())
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            ClientHolder.restartFromPrefs(context)
+                        }
+                        toast(context, "saved - node restarted")
+                    }
+                },
+                enabled = nameField.trim() != currentName,
+            ) { Text("Save") }
+        }
+        Text(
+            "shown on your peers' device lists; saving restarts the node",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        // Diagnostics: the event log, with copy for bug reports.
+        Text("Diagnostics", style = MaterialTheme.typography.titleMedium)
+        val lines = ClientHolder.log.take(40)
+        if (lines.isEmpty()) {
+            Text("no events yet", style = MaterialTheme.typography.bodySmall)
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                lines.forEach { line ->
+                    Text(line, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        TextButton(onClick = {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(
+                ClipData.newPlainText("noscat log", ClientHolder.log.joinToString("\n")),
+            )
+            toast(context, "log copied")
+        }) { Text("Copy log") }
+
+        // Disconnect: also on the connection chip; repeated here so the
+        // support answer "Settings > Disconnect" always works.
+        Spacer(Modifier.height(8.dp))
+        HorizontalDivider()
+        Button(
+            onClick = { confirmDisconnect = true },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.error,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Disconnect from the mesh") }
+        Text(
+            "leaves the mesh and forgets the join; rejoin by scanning the owner's QR",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (confirmDisconnect) {
+        AlertDialog(
+            onDismissRequest = { confirmDisconnect = false },
+            title = { Text("Disconnect from the mesh?") },
+            text = { Text("You can rejoin later by scanning the owner's QR again.") },
+            confirmButton = {
+                Button(onClick = {
+                    confirmDisconnect = false
+                    onDisconnect()
+                }) { Text("Disconnect") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { confirmDisconnect = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+/** Connected indicator in the top bar. Clicking it offers disconnect: the
+ * pill shows the connection, so it acts on the connection too. */
+@Composable
+private fun ConnectionChip(connected: Boolean, onDisconnect: (() -> Unit)? = null) {
+    var confirm by remember { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -787,6 +856,7 @@ private fun ConnectionChip(connected: Boolean) {
                 },
                 CircleShape,
             )
+            .clickable(enabled = connected && onDisconnect != null) { confirm = true }
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Box(
@@ -801,6 +871,22 @@ private fun ConnectionChip(connected: Boolean) {
         Text(
             if (connected) "Connected" else "Connecting",
             style = MaterialTheme.typography.labelMedium,
+        )
+    }
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Disconnect from the mesh?") },
+            text = { Text("You can rejoin later by scanning the owner's QR again.") },
+            confirmButton = {
+                Button(onClick = {
+                    confirm = false
+                    onDisconnect?.invoke()
+                }) { Text("Disconnect") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { confirm = false }) { Text("Cancel") }
+            },
         )
     }
 }
