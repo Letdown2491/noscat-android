@@ -34,6 +34,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,6 +58,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -139,7 +142,20 @@ private fun Root(modifier: Modifier = Modifier) {
                     NavigationBarItem(
                         selected = tab == "chat",
                         onClick = { tab = "chat" },
-                        icon = { Icon(Icons.Filled.Chat, contentDescription = null) },
+                        icon = {
+                            // Unread badge: total unread chats across peers.
+                            if (ClientHolder.unreadTotal > 0) {
+                                BadgedBox(
+                                    badge = {
+                                        Badge { Text("${ClientHolder.unreadTotal}") }
+                                    },
+                                ) {
+                                    Icon(Icons.Filled.Chat, contentDescription = null)
+                                }
+                            } else {
+                                Icon(Icons.Filled.Chat, contentDescription = null)
+                            }
+                        },
                         label = { Text("Chat") },
                     )
                 }
@@ -507,7 +523,8 @@ private fun DevicesScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             list.isEmpty() -> Text(
-                "no other devices in this tailnet yet",
+                "no other devices in this tailnet yet - have another device " +
+                    "scan this phone's QR code, or scan the owner's code to join",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -564,16 +581,27 @@ private fun DevicesScreen(
         ) { Text("Forward a service") }
 
         // Inbox: inbound files land here on their own (node mode).
-        Text("Inbox", style = MaterialTheme.typography.titleMedium)
+        val files = inbox.value
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Inbox", style = MaterialTheme.typography.titleMedium)
+            if (files.isNotEmpty()) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${files.size} file${if (files.size == 1) "" else "s"}, " +
+                        formatSize(files.sumOf { it.length() }),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Text(
             "files sent to this phone land here automatically - tap one to open it",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        val files = inbox.value
         if (files.isEmpty()) {
             Text(
-                "nothing received yet",
+                "nothing received yet - files arrive here even when the app is closed",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -590,18 +618,30 @@ private fun DevicesScreen(
                         .clickable { openInboxFile(context, f) }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
-                    Text(
-                        f.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        formatSize(f.length()),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            f.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            formatSize(f.length()),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = {
+                        if (!ClientHolder.deleteInboxFile(f)) {
+                            toast(context, "could not delete ${f.name}")
+                        }
+                    }) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Delete ${f.name}",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -630,15 +670,41 @@ private fun DevicesScreen(
         AlertDialog(
             onDismissRequest = { showDiagnostics = false },
             confirmButton = { Button(onClick = { showDiagnostics = false }) { Text("Close") } },
+            dismissButton = {
+                TextButton(onClick = {
+                    val cm = context.getSystemService(
+                        Context.CLIPBOARD_SERVICE,
+                    ) as ClipboardManager
+                    cm.setPrimaryClip(
+                        ClipData.newPlainText("noscat log", ClientHolder.log.joinToString("\n")),
+                    )
+                    toast(context, "log copied")
+                }) { Text("Copy log") }
+            },
             title = { Text("Diagnostics") },
             text = {
-                val lines = ClientHolder.log.take(40)
-                if (lines.isEmpty()) {
-                    Text("no events yet")
-                } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(lines) { line ->
-                            Text(line, style = MaterialTheme.typography.labelSmall)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Status summary first: what a support question needs.
+                    val npub = ClientHolder.client?.let {
+                        runCatching { it.npub() }.getOrNull()
+                    }
+                    val status = when {
+                        npub == null -> "not running"
+                        ClientHolder.tailnetDir != null -> "connected - ${short(npub)} (tailnet)"
+                        else -> "connected - ${short(npub)}"
+                    }
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    val lines = ClientHolder.log.take(40)
+                    if (lines.isEmpty()) {
+                        Text("no events yet")
+                    } else {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            items(lines) { line ->
+                                Text(line, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }
@@ -845,7 +911,8 @@ private fun ChatScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 list.isEmpty() -> Text(
-                    "no other devices in this tailnet yet",
+                    "no other devices in this tailnet yet - once a device " +
+                        "joins, chat with it here",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -857,19 +924,36 @@ private fun ChatScreen(
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                memberLabel(m),
-                                style = MaterialTheme.typography.titleSmall,
-                            )
-                            Text(
-                                ClientHolder.chatWith(m.npub).lastOrNull()?.text
-                                    ?: "no messages yet",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    memberLabel(m),
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                Text(
+                                    ClientHolder.chatWith(m.npub).lastOrNull()?.text
+                                        ?: "no messages yet",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if ((ClientHolder.unread[m.npub] ?: 0) > 0) {
+                                // Something arrived since the conversation
+                                // was last on screen.
+                                Box(
+                                    Modifier
+                                        .size(10.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.primary,
+                                            CircleShape,
+                                        ),
+                                )
+                            }
                         }
                     }
                 }
@@ -892,6 +976,10 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
     val scope = rememberCoroutineScope()
     var draft by remember { mutableStateOf("") }
     val msgs = ClientHolder.chatWith(peer)
+
+    // This conversation is on screen: nothing from this peer counts as
+    // unread (re-armed when the message count changes).
+    LaunchedEffect(peer, msgs.size) { ClientHolder.markRead(peer) }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -961,11 +1049,30 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
                             },
                             shape = RoundedCornerShape(16.dp),
                         ) {
-                            Text(
-                                if (m.failed) "${m.text}  (not delivered)" else m.text,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            )
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                Text(
+                                    m.text,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                if (m.outgoing) {
+                                    // Delivery state: pending (sent, no echo
+                                    // yet), a tick once the peer's delivery
+                                    // FIN came back, red when it never did.
+                                    Text(
+                                        when {
+                                            m.failed -> "not delivered"
+                                            m.delivered -> "delivered ✓"
+                                            else -> "sending…"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (m.failed) {
+                                            MaterialTheme.colorScheme.error
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
+                            }
                         }
                     }
                 }

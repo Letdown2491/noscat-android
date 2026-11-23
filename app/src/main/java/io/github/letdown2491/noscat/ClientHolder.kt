@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.compose.runtime.getValue
 import uniffi.noscat.TailnetMember
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -58,6 +59,12 @@ object ClientHolder {
     /** Chat history per peer npub (in memory, oldest first). */
     val chats = HashMap<String, SnapshotStateList<ChatMsg>>()
 
+    /** Unread chat count per peer npub (Compose observable). */
+    val unread = mutableStateMapOf<String, Int>()
+
+    /** Total unread chat messages, for the bottom-nav badge. */
+    val unreadTotal: Int get() = unread.values.sum()
+
     private val main = Handler(Looper.getMainLooper())
     private var appContext: Context? = null
 
@@ -78,6 +85,8 @@ object ClientHolder {
         val text: String,
         val outgoing: Boolean,
         val failed: Boolean = false,
+        /** Outgoing only: the send path returned without error (FIN echoed). */
+        val delivered: Boolean = false,
         val at: Long = System.currentTimeMillis(),
     )
 
@@ -200,7 +209,10 @@ object ClientHolder {
                 inboxVersion++
             }
             is Event.TransferFailed -> transfer = null
-            is Event.ChatMessage -> chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
+            is Event.ChatMessage -> {
+                chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
+                unread[event.peer] = (unread[event.peer] ?: 0) + 1
+            }
             is Event.ChatFailed -> {
                 // Mark the newest undelivered optimistic bubble.
                 val msgs = chats[event.peer] ?: return
@@ -214,6 +226,18 @@ object ClientHolder {
     /** The (live) message list for a conversation, oldest first. */
     fun chatWith(peer: String): SnapshotStateList<ChatMsg> =
         chats.getOrPut(peer) { mutableStateListOf() }
+
+    /** Clear the unread marker (the conversation is on screen). */
+    fun markRead(peer: String) {
+        unread.remove(peer)
+    }
+
+    /** Delete a received inbox file; bumps the inbox so the list refreshes. */
+    fun deleteInboxFile(file: File): Boolean {
+        val ok = file.delete()
+        if (ok) inboxVersion++
+        return ok
+    }
 
     /** Sends a file, tracking progress. Errors land in the log, not the void. */
     fun sendFile(path: String, targetNpub: String) {
@@ -245,7 +269,13 @@ object ClientHolder {
         chatWith(peer).add(ChatMsg(text, outgoing = true))
         Thread {
             try {
+                // Returns only once the peer echoed our delivery FIN.
                 c.sendChat(peer, text)
+                main.post {
+                    val msgs = chatWith(peer)
+                    val idx = msgs.indexOfLast { it.outgoing && !it.delivered && !it.failed }
+                    if (idx >= 0) msgs[idx] = msgs[idx].copy(delivered = true)
+                }
             } catch (t: Throwable) {
                 logLine("chat failed to start: $t")
                 main.post {
