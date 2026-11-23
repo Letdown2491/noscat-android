@@ -67,15 +67,18 @@ object IdentityStore {
 /** Plain (non-secret) app settings. */
 object AppPrefs {
     private const val PREFS = "noscat-app"
-    private const val KEY_TAILNET = "tailnet_dir"
+    private const val KEY_MESH = "mesh_dir"
+    // Pre-rename key; migrated once so existing installs keep their join.
+    private const val KEY_LEGACY = "tailnet_dir"
 
-    /** Path of the imported tailnet device dir, or null when not joined. */
-    fun tailnetDir(context: Context): String? =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_TAILNET, null)
+    /** Path of the imported mesh device dir, or null when not joined. */
+    fun meshDir(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_MESH, null) ?: prefs.getString(KEY_LEGACY, null)
+    }
 
-    fun setTailnetDir(context: Context, path: String?) {
+    fun setMeshDir(context: Context, path: String?) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(KEY_TAILNET, path).commit()
+            .edit().putString(KEY_MESH, path).commit()
     }
 }

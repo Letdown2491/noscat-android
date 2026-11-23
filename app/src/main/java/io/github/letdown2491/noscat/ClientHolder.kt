@@ -6,7 +6,7 @@ import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.getValue
-import uniffi.noscat.TailnetMember
+import uniffi.noscat.MeshMember
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,20 +39,20 @@ object ClientHolder {
     var inboxVersion by mutableStateOf(0)
         private set
 
-    /** The tailnet dir the running client is scoped to, or null (standalone). */
-    var tailnetDir: String? = null
+    /** The mesh dir the running client is scoped to, or null (standalone). */
+    var meshDir: String? = null
         private set
 
     /**
-     * Last known tailnet roster, cached across navigation: the device list
+     * Last known mesh roster, cached across navigation: the device list
      * and the connection pill render instantly from this while a fresh
      * fetch (advert names over relays) runs in the background.
      */
-    var roster: List<TailnetMember>? by mutableStateOf(null)
+    var roster: List<MeshMember>? by mutableStateOf(null)
         private set
 
     /** Refresh the cached roster (called after a successful member fetch). */
-    fun cacheRoster(list: List<TailnetMember>) {
+    fun cacheRoster(list: List<MeshMember>) {
         roster = list
     }
 
@@ -96,13 +96,13 @@ object ClientHolder {
     }
 
     /**
-     * Computes the identity and tailnet state from prefs and starts (or
+     * Computes the identity and mesh state from prefs and starts (or
      * returns) the client. Blocking FFI work: run it off the main thread.
-     * After joining a tailnet, the phone's mesh identity is its tailnet
+     * After joining a mesh, the phone's mesh identity is its mesh
      * device identity; before that it is the standalone app identity.
      */
     fun startFromPrefs(context: Context): NoscatClient? {
-        val dir = AppPrefs.tailnetDir(context)
+        val dir = AppPrefs.meshDir(context)
         val secret = when {
             dir != null -> File(dir, "identity.nsec").readText().trim()
             else -> IdentityStore.load(context) ?: generateIdentity().secretHex.also {
@@ -125,20 +125,20 @@ object ClientHolder {
     /**
      * Starts (or returns) the running client. Blocking FFI call, so run it off
      * the main thread. Returns null and logs when the native side fails.
-     * `tailnetDir` scopes tunnels to a tailnet group (PSK auth) - pass the
-     * joined device directory, or null for bare (non-tailnet) tunnels. With a
-     * tailnet, the client also runs node mode: inbound files land in the app
+     * `meshDir` scopes tunnels to a mesh group (PSK auth) - pass the
+     * joined device directory, or null for bare (non-mesh) tunnels. With a
+     * mesh, the client also runs node mode: inbound files land in the app
      * inbox on their own, and chat messages arrive as events - no arming.
      */
     @Synchronized
-    fun getOrStart(secretHex: String?, tailnetDir: String? = null): NoscatClient? {
+    fun getOrStart(secretHex: String?, meshDir: String? = null): NoscatClient? {
         client?.let { return it }
         return try {
             val c = NoscatClient(
                 uniffi.noscat.ClientConfig(
                     identitySecret = secretHex,
                     relays = null,
-                    tailnetDir = tailnetDir,
+                    meshDir = meshDir,
                     // Peer-facing friendly name: the device model reads far
                     // better than an npub (or Android's "localhost" hostname).
                     deviceName = android.os.Build.MODEL.takeIf { it.isNotBlank() },
@@ -164,11 +164,11 @@ object ClientHolder {
                 },
             )
             client = c
-            this.tailnetDir = tailnetDir
+            this.meshDir = meshDir
             logLine(
-                if (tailnetDir != null) "client started (tailnet joined)" else "client started",
+                if (meshDir != null) "client started (mesh joined)" else "client started",
             )
-            if (tailnetDir != null) {
+            if (meshDir != null) {
                 // Node mode: publish the advert and dispatch inbound streams
                 // (files -> inbox, chat -> events) until the client drops.
                 Thread {
@@ -292,11 +292,11 @@ object ClientHolder {
      * Dropping the UniFFI object tears down its runtime and sockets.
      */
     @Synchronized
-    fun restart(secretHex: String?, tailnetDir: String?): NoscatClient? {
+    fun restart(secretHex: String?, meshDir: String?): NoscatClient? {
         if (client != null) logLine("client stopped")
         client = null
         roster = null
-        return getOrStart(secretHex, tailnetDir)
+        return getOrStart(secretHex, meshDir)
     }
 
     fun render(event: Event): String = when (event) {

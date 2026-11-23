@@ -84,12 +84,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import uniffi.noscat.TailnetMember
+import uniffi.noscat.MeshMember
 import uniffi.noscat.generateIdentity
-import uniffi.noscat.tailnetJoin
-import uniffi.noscat.tailnetMembers
-import uniffi.noscat.tailnetPrepare
-import uniffi.noscat.tailnetSync
+import uniffi.noscat.meshJoin
+import uniffi.noscat.meshMembers
+import uniffi.noscat.meshPrepare
+import uniffi.noscat.meshSync
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -112,7 +112,7 @@ private fun Root(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var tailnetDir by remember { mutableStateOf<String?>(null) }
+    var meshDir by remember { mutableStateOf<String?>(null) }
     var screenReady by remember { mutableStateOf(false) }
 
     // One-time startup: the foreground service owns the client's lifetime,
@@ -120,14 +120,14 @@ private fun Root(modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) {
         runCatching {
             withContext(Dispatchers.IO) { ClientHolder.startFromPrefs(context) }
-            tailnetDir = AppPrefs.tailnetDir(context)
+            meshDir = AppPrefs.meshDir(context)
         }.onFailure { ClientHolder.logLine("startup failed: $it") }
         screenReady = true
     }
 
     if (!screenReady) return
 
-    if (tailnetDir != null) {
+    if (meshDir != null) {
         var tab by remember { mutableStateOf("devices") }
         // The conversation to open in the chat tab (device rows can jump
         // straight into one). null = the chat device list.
@@ -187,20 +187,20 @@ private fun Root(modifier: Modifier = Modifier) {
             Box(Modifier.padding(padding)) {
                 when (tab) {
                     "chat" -> ChatScreen(
-                        tailnetDir = tailnetDir!!,
+                        meshDir = meshDir!!,
                         openPeer = chatPeer,
                         onOpenPeer = { chatPeer = it },
                         onChatClosed = { chatPeer = null },
                     )
                     "files" -> FilesScreen()
                     else -> DevicesScreen(
-                        tailnetDir = tailnetDir!!,
+                        meshDir = meshDir!!,
                         onOpenChat = { npub ->
                             chatPeer = npub
                             tab = "chat"
                         },
                         onDisconnect = {
-                            AppPrefs.setTailnetDir(context, null)
+                            AppPrefs.setMeshDir(context, null)
                             scope.launch {
                                 val secret = withContext(Dispatchers.IO) {
                                     IdentityStore.load(context) ?: generateIdentity().secretHex.also {
@@ -208,7 +208,7 @@ private fun Root(modifier: Modifier = Modifier) {
                                     }
                                 }
                                 withContext(Dispatchers.IO) { ClientHolder.restart(secret, null) }
-                                tailnetDir = null
+                                meshDir = null
                             }
                         },
                     )
@@ -217,7 +217,7 @@ private fun Root(modifier: Modifier = Modifier) {
         }
     } else {
         JoinScreen(
-            onJoined = { dir -> tailnetDir = dir },
+            onJoined = { dir -> meshDir = dir },
         )
     }
 }
@@ -228,7 +228,14 @@ private fun Root(modifier: Modifier = Modifier) {
 @Composable
 private fun JoinScreen(onJoined: (String) -> Unit) {
     val context = LocalContext.current
-    val dir = remember { File(context.filesDir, "tailnet") }
+    // The device dir, renamed from "tailnet" with the tailnet->mesh rename:
+    // migrate existing installs by moving the old directory once.
+    val dir = remember {
+        val new = File(context.filesDir, "mesh")
+        val old = File(context.filesDir, "tailnet")
+        if (old.exists() && !new.exists()) old.renameTo(new)
+        new
+    }
 
     var ownerNpub by remember { mutableStateOf<String?>(null) }
     var ownerField by remember { mutableStateOf("") }
@@ -255,13 +262,13 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
             Spacer(Modifier.height(24.dp))
             Text("noscat", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Join a tailnet",
+                "Join a mesh",
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
             Text(
-                "Ask the device that owns your tailnet for access. " +
-                    "Its QR appears when 'noscat up --tailnet' starts.",
+                "Ask the device that owns your mesh for access. " +
+                    "Its QR appears when 'noscat up --mesh' starts.",
                 style = MaterialTheme.typography.bodyMedium,
             )
 
@@ -314,26 +321,26 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
 
     // Step 2: automatic. Publish this phone's key package (addressed to the
     // owner) and wait for their invitation - the phone joins by itself once
-    // the owner approves, then the client restarts on the tailnet identity.
+    // the owner approves, then the client restarts on the mesh identity.
     LaunchedEffect(ownerNpub, attempt) {
         failed = false
         val republish = launch {
             while (isActive) {
                 runCatching {
                     withContext(Dispatchers.IO) {
-                        tailnetPrepare(dir.absolutePath, ownerNpub)
+                        meshPrepare(dir.absolutePath, ownerNpub)
                     }
                 }.onSuccess { if (deviceNpub == null) deviceNpub = it }
                 if (isActive) delay(30_000)
             }
         }
         val res = withContext(Dispatchers.IO) {
-            runCatching { tailnetJoin(dir.absolutePath, 180uL, ownerNpub) }
+            runCatching { meshJoin(dir.absolutePath, 180uL, ownerNpub) }
         }
         republish.cancel()
         res.fold(
             { members ->
-                AppPrefs.setTailnetDir(context, dir.absolutePath)
+                AppPrefs.setMeshDir(context, dir.absolutePath)
                 val secret = withContext(Dispatchers.IO) {
                     File(dir, "identity.nsec").readText().trim()
                 }
@@ -368,7 +375,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                 color = MaterialTheme.colorScheme.error,
             )
             Text(
-                "Make sure the owner device is running 'noscat up --tailnet' and approves this phone.",
+                "Make sure the owner device is running 'noscat up --mesh' and approves this phone.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -431,11 +438,11 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
 
 // ------------------------------------------------------------- devices
 
-/** The tailnet home: who is on the tailnet and what they can do. */
+/** The mesh home: who is on the mesh and what they can do. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DevicesScreen(
-    tailnetDir: String,
+    meshDir: String,
     onOpenChat: (String) -> Unit,
     onDisconnect: () -> Unit,
 ) {
@@ -453,16 +460,16 @@ private fun DevicesScreen(
     var showDiagnostics by remember { mutableStateOf(false) }
     var confirmDisconnect by remember { mutableStateOf(false) }
 
-    // This phone is a tailnet member too (its device identity) - dialing
+    // This phone is a mesh member too (its device identity) - dialing
     // yourself is meaningless, so it never appears in the list.
     val myNpub = ClientHolder.client?.let { it.npub() }
-    fun others(list: List<TailnetMember>) = list.filter { it.npub != myNpub }
+    fun others(list: List<MeshMember>) = list.filter { it.npub != myNpub }
 
     fun syncDevices(waitSecs: ULong) {
         scope.launch {
             syncing = true
             val res = withContext(Dispatchers.IO) {
-                runCatching { tailnetSync(tailnetDir, waitSecs) }
+                runCatching { meshSync(meshDir, waitSecs) }
             }
             syncing = false
             res.fold(
@@ -478,9 +485,9 @@ private fun DevicesScreen(
         }
     }
 
-    LaunchedEffect(tailnetDir) {
+    LaunchedEffect(meshDir) {
         val res = withContext(Dispatchers.IO) {
-            runCatching { tailnetMembers(tailnetDir) }
+            runCatching { meshMembers(meshDir) }
         }
         res.fold(
             { list ->
@@ -489,7 +496,7 @@ private fun DevicesScreen(
                 selectedNpub = visible.firstOrNull()?.npub
                 ClientHolder.cacheRoster(visible)
             },
-            { ClientHolder.logLine("cannot read tailnet: ${it.message}") },
+            { ClientHolder.logLine("cannot read mesh: ${it.message}") },
         )
     }
 
@@ -541,7 +548,7 @@ private fun DevicesScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             list.isEmpty() -> Text(
-                "no other devices in this tailnet yet - have another device " +
+                "no other devices in this mesh yet - have another device " +
                     "scan this phone's QR code, or scan the owner's code to join",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -606,7 +613,7 @@ private fun DevicesScreen(
                     }
                     val status = when {
                         npub == null -> "not running"
-                        ClientHolder.tailnetDir != null -> "connected - ${short(npub)} (tailnet)"
+                        ClientHolder.meshDir != null -> "connected - ${short(npub)} (mesh)"
                         else -> "connected - ${short(npub)}"
                     }
                     Text(
@@ -630,7 +637,7 @@ private fun DevicesScreen(
     if (confirmDisconnect) {
         AlertDialog(
             onDismissRequest = { confirmDisconnect = false },
-            title = { Text("Disconnect from the tailnet?") },
+            title = { Text("Disconnect from the mesh?") },
             text = { Text("You can rejoin later by scanning the owner's QR again.") },
             confirmButton = {
                 Button(onClick = {
@@ -803,11 +810,11 @@ private fun ConnectionChip(connected: Boolean) {
     }
 }
 
-/** One tailnet device: address, owner badge, selection. */
+/** One mesh device: address, owner badge, selection. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceCard(
-    member: TailnetMember,
+    member: MeshMember,
     selected: Boolean,
     onSelect: () -> Unit,
     onSend: () -> Unit,
@@ -924,7 +931,7 @@ private fun ForwardDialog(target: String, onDismiss: () -> Unit) {
 /** Chat: pick a device to talk to, then a one-message-at-a-time thread. */
 @Composable
 private fun ChatScreen(
-    tailnetDir: String,
+    meshDir: String,
     openPeer: String?,
     onOpenPeer: (String) -> Unit,
     onChatClosed: () -> Unit,
@@ -934,13 +941,13 @@ private fun ChatScreen(
     // Seed from the cached roster so switching tabs renders instantly; the
     // fetch below refreshes names.
     val members = remember { mutableStateOf(ClientHolder.roster) }
-    LaunchedEffect(tailnetDir) {
+    LaunchedEffect(meshDir) {
         val res = withContext(Dispatchers.IO) {
-            runCatching { tailnetMembers(tailnetDir) }
+            runCatching { meshMembers(meshDir) }
         }
         res.fold(
             { list -> members.value = list.filter { it.npub != myNpub } },
-            { ClientHolder.logLine("cannot read tailnet: ${it.message}") },
+            { ClientHolder.logLine("cannot read mesh: ${it.message}") },
         )
     }
 
@@ -962,7 +969,7 @@ private fun ChatScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 list.isEmpty() -> Text(
-                    "no other devices in this tailnet yet - once a device " +
+                    "no other devices in this mesh yet - once a device " +
                         "joins, chat with it here",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1165,12 +1172,12 @@ private fun short(npub: String?): String =
     npub?.let { "${it.take(12)}..." } ?: "selected device"
 
 /** The best label for a device: its friendly name, else a generic one. */
-private fun memberLabel(member: TailnetMember): String =
+private fun memberLabel(member: MeshMember): String =
     member.name?.takeIf { it.isNotBlank() }
         ?: if (member.isOwner) "Owner device" else "Device"
 
 /** Look a member up by npub in the loaded roster. */
-private fun findMember(members: List<TailnetMember>?, npub: String?): TailnetMember? =
+private fun findMember(members: List<MeshMember>?, npub: String?): MeshMember? =
     members?.firstOrNull { it.npub == npub }
 
 private fun formatSize(bytes: Long): String = when {
