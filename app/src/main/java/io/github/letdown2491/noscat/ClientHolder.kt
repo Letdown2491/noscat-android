@@ -262,24 +262,14 @@ object ClientHolder {
      * device identity; before that it is the standalone app identity.
      */
     fun startFromPrefs(context: Context): NoscatClient? {
-        // The tailnet -> mesh rename moved the device directory and the
-        // prefs key. Resolve the stored path once: move the directory and
-        // rewrite prefs if this is the first run since the rename, and
-        // fall back to standalone when the stored path is simply gone.
-        val dir = AppPrefs.meshDir(context)?.let { stored ->
-            when {
-                File(stored).exists() -> stored
-                else -> {
-                    val old = File(context.filesDir, "tailnet")
-                    val new = File(context.filesDir, "mesh")
-                    if (old.exists() && !new.exists()) old.renameTo(new)
-                    if (new.exists()) {
-                        new.absolutePath.also { AppPrefs.setMeshDir(context, it) }
-                    } else {
-                        AppPrefs.setMeshDir(context, null)
-                        null
-                    }
-                }
+        // Fall back to standalone when the stored mesh dir is gone
+        // (uninstalled data, cleared prefs, a disconnect that raced a crash).
+        val stored = AppPrefs.meshDir(context)
+        val dir = when {
+            stored != null && File(stored).exists() -> stored
+            else -> {
+                if (stored != null) AppPrefs.setMeshDir(context, null)
+                null
             }
         }
         val secret = when {

@@ -68,13 +68,11 @@ object IdentityStore {
 object AppPrefs {
     private const val PREFS = "noscat-app"
     private const val KEY_MESH = "mesh_dir"
-    // Pre-rename key; migrated once so existing installs keep their join.
-    private const val KEY_LEGACY = "tailnet_dir"
 
     /** Path of the imported mesh device dir, or null when not joined. */
     fun meshDir(context: Context): String? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_MESH, null) ?: prefs.getString(KEY_LEGACY, null)
+        return prefs.getString(KEY_MESH, null)
     }
 
     fun setMeshDir(context: Context, path: String?) {
