@@ -67,7 +67,9 @@ object IdentityStore {
 /** Plain (non-secret) app settings. */
 object AppPrefs {
     private const val PREFS = "noscat-app"
-    private const val KEY_MESH = "mesh_dir"
+    // noscat 0.5 starts fresh: a 0.4 mesh dir (stored under "mesh_dir")
+    // is never read, so an upgraded phone joins the new mesh again.
+    private const val KEY_MESH = "device_dir"
 
     /** Path of the imported mesh device dir, or null when not joined. */
     fun meshDir(context: Context): String? {

@@ -7,7 +7,7 @@
 # mounted into the container because the host has no Rust toolchain.
 #
 # Usage:
-#   scripts/build-native.sh [version]   # build the published crate; default 0.4.2
+#   scripts/build-native.sh [version]   # build the published crate; default 0.5.0
 #   scripts/build-native.sh local       # build from a noscat checkout
 #                                       # (NOSCAT_DIR overrides, default ~/Documents/noscat)
 set -eu
@@ -16,7 +16,7 @@ NDK="$HOME/Android/Sdk/ndk/27.2.12479018"
 [ -d "$NDK" ] || { echo "NDK not found at $NDK" >&2; exit 1; }
 
 API=26
-COMMON_ENV="-v noscat-cargo-home:/usr/local/cargo:Z -v \"$NDK:/ndk:Z\" \
+COMMON_ENV="-v noscat-cargo-home:/usr/local/cargo:z -v \"$NDK:/ndk:z\" \
   -e NDK_HOME=/ndk \
   -e CC_aarch64_linux_android=/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang \
   -e AR_aarch64_linux_android=/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar \
@@ -30,7 +30,7 @@ if [ "${1:-}" = "local" ]; then
   }
   podman run --rm \
     $(eval echo $COMMON_ENV) \
-    -v "$NOSCAT_DIR:/noscat:Z" \
+    -v "$NOSCAT_DIR:/noscat:z" \
     -v "$PWD/app/src/main:/out:Z" \
     -w /noscat localhost/noscat-dev \
     sh -c "set -eu
@@ -48,7 +48,7 @@ if [ "${1:-}" = "local" ]; then
   exit 0
 fi
 
-NFFI_VERSION="${1:-0.4.2}"
+NFFI_VERSION="${1:-0.5.0}"
 
 podman run --rm \
   $(eval echo $COMMON_ENV) \

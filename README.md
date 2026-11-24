@@ -6,7 +6,7 @@ the noscat workspace (`noscat-core`/`noscat-client`/`noscat-ffi`), so this repo
 contains no protocol code.
 
 Status: phase 1 in progress - a remote-reach client: chat, file send/receive,
-port forwards to a peer's services, and joining the owner's mesh by invite.
+port forwards to a peer's services, and joining a mesh by scanning a member's QR.
 Roadmap and agent guidance in [AGENTS.md](AGENTS.md).
 
 ## Building

@@ -332,7 +332,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
     val context = LocalContext.current
     // ClientHolder.startFromPrefs owns the pre-rename directory migration;
     // a device that is not joined has no legacy dir, so just use the name.
-    val dir = remember { File(context.filesDir, "mesh") }
+    val dir = remember { File(context.filesDir, "device") }
 
     var ownerNpub by remember { mutableStateOf<String?>(null) }
     var ownerField by remember { mutableStateOf("") }
@@ -1116,7 +1116,7 @@ private fun DeviceCard(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
             PresenceDot(
-                live = member.online() || ClientHolder.liveTunnels[member.npub] == true,
+                live = member.fresh() || ClientHolder.liveTunnels[member.npub] == true,
             )
             Spacer(Modifier.width(6.dp))
             // The name is the npub copy affordance: tap it and the full
@@ -1178,12 +1178,13 @@ private fun DeviceCard(
         }
     }
 }
-/** Matches noscat-core's ADVERT_TTL_SECS: a node re-publishes its advert
- * on this timer, so an advert younger than the TTL means the peer is up. */
-private const val ADVERT_TTL_SECS: ULong = 3600uL
+/** Matches noscat-core's presence window: members advertise every two
+ * minutes, so an advert younger than ten means the peer is up. */
+private const val ADVERT_TTL_SECS: ULong = 600uL
 
-/** Online per the mesh presence: the peer's advert is fresh. */
-private fun MeshMember.online(): Boolean =
+/** Online per the mesh presence: the peer's advert is fresh (aged forward
+ * from the cached roster, so it holds between syncs). */
+private fun MeshMember.fresh(): Boolean =
     lastSeenSecs?.let { it < ADVERT_TTL_SECS } ?: false
 
 /** Live-tunnel presence dot: green while the peer looks online (fresh
@@ -1541,7 +1542,7 @@ private fun short(npub: String?): String =
 /** The best label for a device: its friendly name, else a generic one. */
 private fun memberLabel(member: MeshMember): String =
     member.name?.takeIf { it.isNotBlank() }
-        ?: if (member.isOwner) "Owner device" else "Device"
+        ?: "Device"
 
 private fun formatSize(bytes: Long): String = when {
     bytes >= 1 shl 20 -> "${bytes / (1 shl 20)} MB"

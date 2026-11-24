@@ -66,7 +66,7 @@ object ClientHolder {
         private set
 
     private val rosterFile: File
-        get() = File(appContext!!.filesDir, "roster.json")
+        get() = File(appContext!!.filesDir, "members.json")
 
     /** Epoch ms when [roster]'s lastSeenSecs were measured (persisted
      * alongside the roster), so cached presence can be aged forward. */
@@ -81,7 +81,8 @@ object ClientHolder {
             list.forEach { m ->
                 arr.put(JSONObject().apply {
                     put("npub", m.npub)
-                    put("isOwner", m.isOwner)
+                    put("admin", m.admin)
+                    put("thisDevice", m.thisDevice)
                     m.name?.let { put("name", it) } ?: put("name", JSONObject.NULL)
                     m.lastSeenSecs?.let { put("lastSeenSecs", it.toLong()) }
                         ?: put("lastSeenSecs", JSONObject.NULL)
@@ -104,10 +105,13 @@ object ClientHolder {
             val m = arr.getJSONObject(i)
             MeshMember(
                 npub = m.getString("npub"),
-                isOwner = m.getBoolean("isOwner"),
                 name = if (m.isNull("name")) null else m.getString("name"),
                 lastSeenSecs = if (m.isNull("lastSeenSecs")) null
                     else m.getLong("lastSeenSecs").toULong(),
+                // Recomputed from the aged lastSeenSecs where shown.
+                online = false,
+                admin = m.optBoolean("admin", true),
+                thisDevice = m.optBoolean("thisDevice", false),
             )
         }
     }.getOrNull()
@@ -167,7 +171,7 @@ object ClientHolder {
                         if (p != null && m.name == null && m.lastSeenSecs == null) {
                             p.copy(
                                 npub = m.npub,
-                                isOwner = m.isOwner,
+                                admin = m.admin,
                                 lastSeenSecs = p.lastSeenSecs?.let { it + elapsedSecs },
                             )
                         } else {
@@ -475,6 +479,14 @@ object ClientHolder {
                     else "${event.what} stopped",
                 )
             }
+            // Membership and presence changes: the running client is the
+            // source of truth, so a sync reads it straight back.
+            is Event.MeshJoined, is Event.Roster, is Event.MemberSeen,
+            is Event.MeshLeft -> syncRoster()
+            is Event.MeshChangeUndone -> {}
+            // Inviting from the phone needs an approve prompt (not built
+            // yet); render() logs the request.
+            is Event.JoinRequest -> {}
         }
     }
 
@@ -706,5 +718,12 @@ object ClientHolder {
         is Event.Clipboard -> "clipboard shared by ${event.peer} (${event.text.length} chars)"
         is Event.Stopped -> "stopped: ${event.what}" +
             (event.error?.let { " ($it)" } ?: "")
+        is Event.MeshJoined -> "in mesh ${event.name}"
+        is Event.Roster -> "mesh now has ${event.members.size} members"
+        is Event.MemberSeen -> "seen: ${event.name ?: event.peer}"
+        is Event.MeshChangeUndone ->
+            "another device changed the mesh at the same moment and won; try again"
+        is Event.MeshLeft -> "this device is no longer in the mesh"
+        is Event.JoinRequest -> "${event.name ?: event.peer} asks to join the mesh"
     }
 }

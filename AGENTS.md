@@ -4,14 +4,15 @@ Guidance for AI agents working in this repo. Read this file fully before making 
 
 ## What this project is
 
-The Android client for [noscat](https://github.com/Letdown2491/noscat), a Nostr-native mesh
-VPN (Noise XK over UDP, Nostr as the control plane). Identity is an npub. This repo is
+The Android client for [noscat](https://github.com/Letdown2491/noscat), a Nostr-native device
+mesh (0.5: Marmot groups on Nostr relays for membership, FIPS with QUIC streams for
+data). Identity is an npub. This repo is
 native Kotlin (Compose) on top of the upstream `noscat-ffi` UniFFI bridge crate; the
 protocol and the FFI layer live in the noscat workspace, never in this repo.
 
 **Phase 1 (current scope): remote-reach client only.** The phone dials out: chat
 with peers, send/receive files, forward a peer's services to local ports, and join
-the owner's mesh by invite (publish key package, get invited, join).
+a mesh by scanning a member's QR (send it a join request, get invited, join).
 
 Phase 2: expose/serve (phone publishes services peers can dial). The FFI already
 has `up()` for node mode when this starts.
@@ -21,7 +22,7 @@ layer stays native Kotlin instead of a cross-platform framework.
 
 ## Non-negotiable rules
 
-1. **Zero protocol code in this repo.** If a change needs Noise, UDP framing, Nostr
+1. **Zero protocol code in this repo.** If a change needs FIPS, QUIC streams, Marmot, Nostr
    events, relay logic, advert handling, or FFI surface changes, it belongs in the
    noscat repo's `crates/noscat-ffi`, published to crates.io, then bumped here.
    The upstream API contract is `API.md` in the
@@ -59,16 +60,19 @@ layer stays native Kotlin instead of a cross-platform framework.
   `ClientHolder.kt` owns the running client and exposes client lifetime,
   roster cache, chat history, unread counts, forwards, and transfer state
   as Compose snapshot state.
-  The roster persists to `filesDir/roster.json` so startup renders the
-  device list instantly. Devices refresh themselves: `ClientHolder`
-  syncs on a 2 minute timer for the life of the client, plus once when
-  the node starts listening on the relays (a sync before that sees
-  nothing); tab switches never hit the network, and pull to refresh
-  forces a sync any time. `meshSync` returns membership only; the sync
-  enriches it with `meshMembers` for advert names and presence
-  (`lastSeenSecs`, green/red dot). A per-device advert fetch can come
-  back empty (relays are flaky), so a sync keeps the previous name and
-  presence, aged forward, instead of flashing a live peer red.
+  The roster persists to `filesDir/members.json` so startup renders the
+  device list instantly. The running client follows the mesh live, so
+  `meshSync`/`meshMembers` read its members (names and `lastSeenSecs`
+  presence) without a relay round trip; `ClientHolder` syncs on a 2
+  minute timer, when listening starts, and on the `MeshJoined`,
+  `Roster`, `MemberSeen` and `MeshLeft` events. Presence is green while
+  the latest advert is under ten minutes old, aged forward between
+  syncs.
+  noscat 0.5 starts fresh: the device lives in `filesDir/device` (pref
+  `device_dir`), and 0.4's `mesh` dir, `mesh_dir` pref and `roster.json`
+  are never read. Inviting and creating a mesh from the phone need UI
+  that does not exist yet (`JoinRequest` events are only logged); a CLI
+  device creates the mesh and invites.
 - `scripts/build-native.sh` - cross-compiles the `noscat-ffi` crate
   for arm64, strips the .so into `app/src/main/jniLibs/`, and regenerates the
   Kotlin bindings. `local` builds the `~/Documents/noscat` checkout.
@@ -109,7 +113,7 @@ UniFFI gotchas already paid for; do not regress:
 - UniFFI 0.29 Kotlin: Rust constructors map to real Kotlin constructors
   (`NoscatClient(...)`, not `NoscatClient.new(...)`), flat errors surface as
   `NoscatException`, `u16` maps to `UShort`, `u64` to `ULong`, record fields are
-  camelCased (`is_owner` -> `isOwner`), and free functions become top-level
+  camelCased (`this_device` -> `thisDevice`), and free functions become top-level
   `generateIdentity()` / `identityFromSecret()` / `meshJoin(...)` etc. Check
   the generated file when the Rust surface changes.
 
@@ -123,22 +127,20 @@ Kotlin bindings regenerate with it.
 
 ## Runtime behavior the app must handle (phase 1)
 
-- Adverts expire (TTL); a client that listens must re-advertise. On network change
-  (Wi-Fi to cellular), re-publish the advert and expect tunnels to drop
-  (`Event.TunnelClosed`) and re-establish.
+- Members advertise inside the group every two minutes (the client does this). On
+  network change (Wi-Fi to cellular) call `networkChanged()` and expect connections
+  to drop (`Event.TunnelClosed`) and come back on next use.
 - Background survival needs a foreground service (`FOREGROUND_SERVICE` permission is
   already in the manifest); without one, Android kills the UDP sockets when the app
   is backgrounded.
 - File transfers complete asynchronously: `sendFile` returns immediately; progress,
   success, and failure arrive as `TransferProgress` / `TransferDone` /
   `TransferFailed` events. Inbound files land in the app inbox automatically.
-- Chat is asynchronous too: 0.4.0 sends (`sendChat`, `sendClipboard`) are
+- Chat is asynchronous too: sends (`sendChat`, `sendClipboard`) are
   fire-and-forget; the optimistic bubble is marked delivered by the
   `ChatDelivered` event (the peer's FIN echo), never by the call returning.
   Failure surfaces as `ChatFailed`. Incoming messages arrive as
-  `ChatMessage`. A transport-level FIN (empty Noise payload) carries the
-  message end - the router must pass 16-byte frames; see noscat commit
-  `52f00c0`.
+  `ChatMessage`.
 - An outgoing send can be cancelled: `cancelTransfer(path, peer)` stops it
   between chunks (`TransferCancelled` event); the receiver keeps a
   resumable partial, so the next send of the same file continues.
