@@ -67,9 +67,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Android
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
@@ -77,14 +76,15 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.TextSnippet
@@ -214,13 +214,9 @@ private fun Root(modifier: Modifier = Modifier) {
         }
         Scaffold(
             bottomBar = {
+                // Five tabs, Devices in the center and slightly larger:
+                // it is the hub the other tabs orbit (chat, forwards).
                 NavigationBar {
-                    NavigationBarItem(
-                        selected = tab == "devices",
-                        onClick = { tab = "devices" },
-                        icon = { Icon(Icons.Filled.Devices, contentDescription = null) },
-                        label = { Text("Devices") },
-                    )
                     NavigationBarItem(
                         selected = tab == "chat",
                         onClick = { tab = "chat" },
@@ -231,10 +227,16 @@ private fun Root(modifier: Modifier = Modifier) {
                                         Badge { Text("${ClientHolder.unreadTotal}") }
                                     },
                                 ) {
-                                    Icon(Icons.Filled.Chat, contentDescription = null)
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Chat,
+                                        contentDescription = null,
+                                    )
                                 }
                             } else {
-                                Icon(Icons.Filled.Chat, contentDescription = null)
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Chat,
+                                    contentDescription = null,
+                                )
                             }
                         },
                         label = { Text("Chat") },
@@ -256,6 +258,34 @@ private fun Root(modifier: Modifier = Modifier) {
                         label = { Text("Files") },
                     )
                     NavigationBarItem(
+                        selected = tab == "devices",
+                        onClick = { tab = "devices" },
+                        icon = {
+                            Icon(
+                                Icons.Filled.Devices,
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp),
+                            )
+                        },
+                        label = { Text("Devices") },
+                    )
+                    NavigationBarItem(
+                        selected = tab == "services",
+                        onClick = { tab = "services" },
+                        icon = {
+                            if (ClientHolder.forwards.isNotEmpty()) {
+                                BadgedBox(
+                                    badge = { Badge { Text("${ClientHolder.forwards.size}") } },
+                                ) {
+                                    Icon(Icons.Filled.SwapHoriz, contentDescription = null)
+                                }
+                            } else {
+                                Icon(Icons.Filled.SwapHoriz, contentDescription = null)
+                            }
+                        },
+                        label = { Text("Services") },
+                    )
+                    NavigationBarItem(
                         selected = tab == "settings",
                         onClick = { tab = "settings" },
                         icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
@@ -266,21 +296,22 @@ private fun Root(modifier: Modifier = Modifier) {
         ) { padding ->
             Box(Modifier.padding(padding)) {
                 when (tab) {
-                    "chat" -> ChatScreen(
-                        meshDir = meshDir!!,
-                        openPeer = chatPeer,
-                        onOpenPeer = { chatPeer = it },
-                        onChatClosed = { chatPeer = null },
-                        onDisconnect = disconnect,
-                    )
                     "files" -> FilesScreen(onDisconnect = disconnect)
+                    "services" -> ServicesScreen(onDisconnect = disconnect)
                     "settings" -> SettingsScreen(onDisconnect = disconnect)
-                    else -> DevicesScreen(
+                    "devices" -> DevicesScreen(
                         meshDir = meshDir!!,
                         onOpenChat = { npub ->
                             chatPeer = npub
                             tab = "chat"
                         },
+                        onDisconnect = disconnect,
+                    )
+                    else -> ChatScreen(
+                        meshDir = meshDir!!,
+                        openPeer = chatPeer,
+                        onOpenPeer = { chatPeer = it },
+                        onChatClosed = { chatPeer = null },
                         onDisconnect = disconnect,
                     )
                 }
@@ -389,19 +420,22 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
     // owner) and wait for their invitation - the phone joins by itself once
     // the owner approves, then the client restarts on the mesh identity.
     LaunchedEffect(ownerNpub, attempt) {
+        // The FFI (0.4.0) requires the owner's npub: it refuses invites
+        // from anyone else, and a mesh owned by anyone else.
+        val owner = ownerNpub ?: return@LaunchedEffect
         failed = false
         val republish = launch {
             while (isActive) {
                 runCatching {
                     withContext(Dispatchers.IO) {
-                        meshPrepare(dir.absolutePath, ownerNpub)
+                        meshPrepare(dir.absolutePath, ownerNpub, null)
                     }
                 }.onSuccess { if (deviceNpub == null) deviceNpub = it }
                 if (isActive) delay(30_000)
             }
         }
         val res = withContext(Dispatchers.IO) {
-            runCatching { meshJoin(dir.absolutePath, 180uL, ownerNpub) }
+            runCatching { meshJoin(dir.absolutePath, 180uL, owner, null) }
         }
         republish.cancel()
         res.fold(
@@ -609,6 +643,77 @@ private fun DevicesScreen(
     }
 }
 
+/** Services: the port forwards this phone is running - a peer's exposed
+ * service reaches this phone at localhost:<port>. The desktop app's
+ * Services tab, dial-out half; expose (publishing this phone's services)
+ * is phase 2. */
+@Composable
+private fun ServicesScreen(onDisconnect: () -> Unit) {
+    // The holder's registry reconciles itself via ForwardStopped; this
+    // picks up anything that changed since the tab was last open. An
+    // in-memory snapshot, not a network call.
+    LaunchedEffect(Unit) { ClientHolder.refreshForwards() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Services", style = MaterialTheme.typography.headlineMedium)
+            Spacer(Modifier.weight(1f))
+            ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
+        }
+        val roster = ClientHolder.roster
+        val forwards = ClientHolder.forwards
+        if (forwards.isEmpty()) {
+            Text(
+                "nothing forwarded yet. tap the forward icon on a device " +
+                    "in the Devices tab: that device's service then reaches " +
+                    "this phone at localhost:<port>",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        forwards.forEach { f ->
+            val label = roster?.firstOrNull { it.npub == f.target }
+                ?.let(::memberLabel) ?: short(f.target)
+            val localPort = f.local.substringAfterLast(':')
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "localhost:$localPort",
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            "via $label",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { ClientHolder.cancelForward(f.id) }) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Stop forward localhost:$localPort",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 /** Files: the inbox plus live transfer progress. */
 @Composable
 private fun FilesScreen(onDisconnect: () -> Unit) {
@@ -658,10 +763,25 @@ private fun FilesScreen(onDisconnect: () -> Unit) {
                         Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            if (t.incoming) "Receiving ${t.name}" else "Sending ${t.name}",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (t.incoming) "Receiving ${t.name}" else "Sending ${t.name}",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            // Outgoing sends can be stopped (0.4.0
+                            // cancelTransfer); the receiver keeps its
+                            // resumable partial.
+                            if (!t.incoming) {
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            ClientHolder.cancelTransfer(t.path, t.peer)
+                                        }
+                                    }
+                                }) { Text("Stop") }
+                            }
+                        }
                         if (!t.incoming && t.total > 0) {
                             LinearProgressIndicator(
                                 progress = { t.percent / 100f },
@@ -1010,12 +1130,26 @@ private fun DeviceCard(
                     .weight(1f)
                     .clickable(onClick = copyNpub),
             )
-            // Row-level actions: chat, share this phone's clipboard, send
-            // a file, forward one of this device's services.
+            // Row-level actions, in the desktop app's order: chat, send a
+            // file, forward a service, share this phone's clipboard.
             IconButton(onClick = onChat) {
                 Icon(
-                    Icons.Filled.Chat,
+                    Icons.AutoMirrored.Filled.Chat,
                     contentDescription = "Chat with ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onSend) {
+                Icon(
+                    Icons.Filled.FolderOpen,
+                    contentDescription = "Send a file to ${memberLabel(member)}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onForward) {
+                Icon(
+                    Icons.Filled.SwapHoriz,
+                    contentDescription = "Forward a service of ${memberLabel(member)}",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -1026,31 +1160,18 @@ private fun DeviceCard(
                 if (text.isNullOrEmpty()) {
                     toast(context, "clipboard is empty")
                 } else {
+                    // Delivered toast fires on the ChatDelivered event;
+                    // the send returns before the peer even answers.
                     scope.launch {
                         withContext(Dispatchers.IO) {
                             ClientHolder.sendClipboard(member.npub, text)
                         }
-                        toast(context, "clipboard sent to ${memberLabel(member)}")
                     }
                 }
             }) {
                 Icon(
                     Icons.Filled.ContentPaste,
                     contentDescription = "Paste this phone's clipboard to ${memberLabel(member)}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onSend) {
-                Icon(
-                    Icons.Filled.AttachFile,
-                    contentDescription = "Send a file to ${memberLabel(member)}",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onForward) {
-                Icon(
-                    Icons.Filled.Lan,
-                    contentDescription = "Forward a service of ${memberLabel(member)}",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -1156,22 +1277,12 @@ private fun ForwardDialog(target: String, onDismiss: () -> Unit) {
         },
         confirmButton = {
             Button(onClick = {
-                val c = ClientHolder.client
                 val p = port.toUShortOrNull()
                 when {
-                    c == null -> toast(context, "client is not running")
                     p == null -> toast(context, "enter a port")
                     else -> scope.launch {
-                        val ok = withContext(Dispatchers.IO) {
-                            runCatching { c.forward(target, p) }
-                        }
-                        ok.fold(
-                            {
-                                ClientHolder.logLine("forward dialled: localhost:$p -> ${target.take(16)}...")
-                                onDismiss()
-                            },
-                            { toast(context, "forward failed: ${it.message}") },
-                        )
+                        withContext(Dispatchers.IO) { ClientHolder.forward(target, p) }
+                        onDismiss()
                     }
                 }
             }) { Text("Connect") }

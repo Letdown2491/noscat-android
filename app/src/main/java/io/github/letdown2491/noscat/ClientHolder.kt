@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import uniffi.noscat.Event
 import uniffi.noscat.EventListener
+import uniffi.noscat.ForwardInfo
 import uniffi.noscat.NoscatClient
 import uniffi.noscat.generateIdentity
 import java.io.File
@@ -132,13 +133,13 @@ object ClientHolder {
         val gen = syncGen.get()
         syncing = true
         Thread {
-            val res = runCatching { meshSync(dir, waitSecs) }
+            val res = runCatching { meshSync(dir, waitSecs, null) }
                 // meshSync returns membership only (no advert data);
                 // enrich with names and presence from the per-device
                 // advert fetch, keeping the membership from meshSync on
                 // the rare failure.
                 .mapCatching { synced ->
-                    runCatching { meshMembers(dir) }
+                    runCatching { meshMembers(dir, null) }
                         .onSuccess { l ->
                             logLine(
                                 "enriched ${l.count { it.name != null }}/" +
@@ -206,6 +207,14 @@ object ClientHolder {
     /** Unread chat count per peer npub (Compose observable). */
     val unread = mutableStateMapOf<String, Int>()
 
+    /** Port forwards this device is running (the Services list): rows
+     * created from device dialogs, reconciled by ForwardStopped. */
+    val forwards = mutableStateListOf<ForwardInfo>()
+
+    /** Peers a clipboard share is in flight to; ChatDelivered for one of
+     * these completes a share (and toasts) rather than a chat bubble. */
+    private val pendingClipboard = mutableSetOf<String>()
+
     /** Peers with a live tunnel right now (Compose observable). The
      * presence dot on the device and chat rows reads this. One-shot
      * tunnels (chat, file sends) blink up and down in a moment, so a
@@ -231,6 +240,7 @@ object ClientHolder {
     data class TransferState(
         val name: String,
         val peer: String,
+        val path: String,
         val sent: Long,
         val total: Long,
         val incoming: Boolean,
@@ -327,6 +337,7 @@ object ClientHolder {
                         if (
                             event is Event.TransferDone ||
                             event is Event.TransferFailed ||
+                            event is Event.TransferPartial ||
                             event is Event.ChatMessage
                         ) {
                             val text = render(event)
@@ -377,6 +388,7 @@ object ClientHolder {
             is Event.TransferProgress -> transfer = TransferState(
                 name = File(event.path).name,
                 peer = event.peer,
+                path = event.path,
                 sent = event.sent.toLong(),
                 total = event.total.toLong(),
                 incoming = false,
@@ -386,9 +398,47 @@ object ClientHolder {
                 inboxVersion++
             }
             is Event.TransferFailed -> transfer = null
+            is Event.TransferPartial -> {
+                // A receive that ended without a verified whole file
+                // (0.4.1 honest reporting): the kept .noscat-part is a
+                // resume seed only, not a usable file, so no inbox bump.
+                transfer = null
+                logLine("transfer incomplete: ${File(event.path).name} (kept as a partial, resume by sending again)")
+            }
+            is Event.TransferCancelled -> {
+                transfer = null
+                logLine(
+                    "transfer cancelled: ${File(event.path).name} " +
+                        "(receiver keeps the partial)",
+                )
+            }
             is Event.ChatMessage -> {
                 chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
                 unread[event.peer] = (unread[event.peer] ?: 0) + 1
+            }
+            is Event.ChatDelivered -> {
+                // The peer echoed the delivery FIN: mark the newest
+                // optimistic bubble. Also completes a clipboard share,
+                // which rides the same wire shape.
+                val msgs = chats[event.peer]
+                if (msgs != null) {
+                    val idx = msgs.indexOfLast { it.outgoing && !it.delivered && !it.failed }
+                    if (idx >= 0) msgs[idx] = msgs[idx].copy(delivered = true)
+                }
+                if (pendingClipboard.remove(event.peer) != null) {
+                    Toast.makeText(
+                        appContext,
+                        "clipboard delivered",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+            is Event.ForwardStopped -> {
+                forwards.removeAll { it.id == event.id }
+                logLine(
+                    if (event.error != null) "forward ${event.id} failed: ${event.error}"
+                    else "forward ${event.id} stopped",
+                )
             }
             is Event.TunnelUp -> {
                 pendingClose.remove(event.peer)?.let { main.removeCallbacks(it) }
@@ -415,7 +465,16 @@ object ClientHolder {
                 val idx = msgs.indexOfLast { it.outgoing && !it.failed }
                 if (idx >= 0) msgs[idx] = msgs[idx].copy(failed = true)
             }
-            else -> {}
+            is Event.Listening -> {
+                // Serve side is up; render() logs it, nothing to track.
+            }
+            is Event.Stopped -> {
+                // A background op (listener, expose, forward) stopped.
+                logLine(
+                    if (event.error != null) "${event.what} stopped: ${event.error}"
+                    else "${event.what} stopped",
+                )
+            }
         }
     }
 
@@ -476,6 +535,7 @@ object ClientHolder {
         transfer = TransferState(
             name = name,
             peer = targetNpub,
+            path = path,
             sent = 0,
             total = 0,
             incoming = false,
@@ -494,18 +554,72 @@ object ClientHolder {
     }
 
     /** Share this device's clipboard text with a peer: it becomes the
-     * clipboard on the receiving device. Fire and forget; a failure lands
-     * in the event log (the text is still on our clipboard either way). */
+     * clipboard on the receiving device. Delivery confirmation (the
+     * peer's FIN echo) arrives as ChatDelivered, which completes the
+     * pending share with a toast. */
     fun sendClipboard(peer: String, text: String) {
         val c = client ?: run { logLine("clipboard send aborted: client is not running"); return }
+        pendingClipboard.add(peer)
         Thread {
             try {
-                // Returns once the peer echoed the delivery FIN.
                 c.sendClipboard(peer, text)
-                logLine("clipboard sent to ${peer.take(16)}... (${text.length} chars)")
             } catch (t: Throwable) {
+                pendingClipboard.remove(peer)
                 logLine("clipboard send failed: $t")
             }
+        }.start()
+    }
+
+    /** Forward a local port to a peer's exposed service. The id-keyed
+     * row appears in [forwards]; ForwardStopped reconciles it. */
+    fun forward(target: String, port: UShort) {
+        val c = client ?: run { logLine("forward aborted: client is not running"); return }
+        Thread {
+            runCatching { c.forward(target, port) }.fold(
+                { id ->
+                    logLine("forward $id dialled: localhost:$port -> ${target.take(16)}...")
+                    refreshForwards()
+                },
+                { logLine("forward failed: ${it.message}") },
+            )
+        }.start()
+    }
+
+    /** Stop a forward by id. The row leaves [forwards] when the
+     * confirming ForwardStopped event lands, not here. */
+    fun cancelForward(id: ULong) {
+        val c = client ?: return
+        Thread {
+            val ok = c.cancelForward(id)
+            logLine(
+                if (ok) "cancelling forward $id" else "forward $id already gone",
+            )
+        }.start()
+    }
+
+    /** Snapshot the client's live forward registry into [forwards]. An
+     * in-memory read, but still off the main thread (rule 6). */
+    fun refreshForwards() {
+        val c = client ?: return
+        Thread {
+            val list = runCatching { c.listForwards() }.getOrDefault(emptyList())
+            main.post {
+                forwards.clear()
+                forwards.addAll(list)
+            }
+        }.start()
+    }
+
+    /** Cancel an in-flight outgoing send. The progress card clears when
+     * the TransferCancelled event lands; the receiver keeps its partial. */
+    fun cancelTransfer(path: String, peer: String) {
+        val c = client ?: return
+        Thread {
+            val ok = c.cancelTransfer(path, peer)
+            logLine(
+                if (ok) "cancelling transfer of ${File(path).name}"
+                else "transfer already finished",
+            )
         }.start()
     }
 
@@ -518,18 +632,15 @@ object ClientHolder {
         }
     }
 
-    /** Sends a chat message; the optimistic bubble marks itself on failure. */    fun sendChat(peer: String, text: String) {
+    /** Sends a chat message; the optimistic bubble is marked delivered by
+     * the ChatDelivered event (0.4.0 sends are fire and forget), and
+     * failed by ChatFailed. */
+    fun sendChat(peer: String, text: String) {
         val c = client ?: run { logLine("chat aborted: client is not running"); return }
         chatWith(peer).add(ChatMsg(text, outgoing = true))
         Thread {
             try {
-                // Returns only once the peer echoed our delivery FIN.
                 c.sendChat(peer, text)
-                main.post {
-                    val msgs = chatWith(peer)
-                    val idx = msgs.indexOfLast { it.outgoing && !it.delivered && !it.failed }
-                    if (idx >= 0) msgs[idx] = msgs[idx].copy(delivered = true)
-                }
             } catch (t: Throwable) {
                 logLine("chat failed to start: $t")
                 main.post {
@@ -554,6 +665,8 @@ object ClientHolder {
         nodeUp = false
         syncing = false
         roster = null
+        forwards.clear()
+        pendingClipboard.clear()
         // A stale persisted roster would show mesh peers while standalone.
         runCatching { rosterFile.delete() }
         return getOrStart(secretHex, meshDir)
@@ -580,8 +693,16 @@ object ClientHolder {
             "transfer ${event.sent * 100uL / maxOf(event.total, 1uL)}%: ${File(event.path).name}"
         is Event.TransferDone -> "transfer done: ${File(event.path).name} <- ${event.peer}"
         is Event.TransferFailed -> "transfer failed: ${event.peer}: ${event.error}"
+        is Event.TransferPartial ->
+            "transfer incomplete: ${File(event.path).name} (kept as a partial)"
+        is Event.TransferCancelled ->
+            "transfer cancelled: ${File(event.path).name} (receiver keeps the partial)"
         is Event.ChatMessage -> "message from ${event.peer}: ${event.text}"
+        is Event.ChatDelivered -> "delivered: ${event.peer}"
         is Event.ChatFailed -> "message not delivered: ${event.peer}: ${event.error}"
+        is Event.ForwardStopped ->
+            if (event.error != null) "forward ${event.id} failed: ${event.error}"
+            else "forward ${event.id} stopped"
         is Event.Clipboard -> "clipboard shared by ${event.peer} (${event.text.length} chars)"
         is Event.Stopped -> "stopped: ${event.what}" +
             (event.error?.let { " ($it)" } ?: "")
