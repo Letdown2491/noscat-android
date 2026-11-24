@@ -25,6 +25,8 @@ layer stays native Kotlin instead of a cross-platform framework.
 1. **Zero protocol code in this repo.** If a change needs FIPS, QUIC streams, Marmot, Nostr
    events, relay logic, advert handling, or FFI surface changes, it belongs in the
    noscat repo's `crates/noscat-ffi`, published to crates.io, then bumped here.
+   Until noscat 0.5.0 is published, build it from the local checkout
+   (`scripts/build-native.sh local`).
    The upstream API contract is `API.md` in the
    [noscat repo](https://github.com/Letdown2491/noscat/blob/main/API.md): consult
    it before touching event handling, mesh glue, or the FFI surface. Its
@@ -56,7 +58,10 @@ layer stays native Kotlin instead of a cross-platform framework.
   port forwards this phone is running, each stoppable; expose joins this
   tab in phase 2), Settings (status, device name, diagnostics). Disconnect
   lives on the connection chip itself (click it, on any tab's header) plus
-  a button in Settings, both behind a confirm dialog.
+  a button in Settings, both behind a confirm dialog. It only forgets the
+  mesh locally (clears the `device_dir` pref and restarts standalone): it
+  does not call `meshLeave`, so the device stays a member, and its
+  `filesDir/device` state is kept.
   `ClientHolder.kt` owns the running client and exposes client lifetime,
   roster cache, chat history, unread counts, forwards, and transfer state
   as Compose snapshot state.
@@ -72,7 +77,12 @@ layer stays native Kotlin instead of a cross-platform framework.
   `device_dir`), and 0.4's `mesh` dir, `mesh_dir` pref and `roster.json`
   are never read. Inviting and creating a mesh from the phone need UI
   that does not exist yet (`JoinRequest` events are only logged); a CLI
-  device creates the mesh and invites.
+  device creates the mesh and invites. The join screen's `meshJoin` runs
+  a temporary device for `filesDir/device`; it is released when the call
+  returns, and only then does `ClientHolder.restart` start the app's
+  client there (one device per directory).
+- `app/.../NoscatService.kt` - the foreground service that keeps the client
+  alive while the app is in the background.
 - `scripts/build-native.sh` - cross-compiles the `noscat-ffi` crate
   for arm64, strips the .so into `app/src/main/jniLibs/`, and regenerates the
   Kotlin bindings. `local` builds the `~/Documents/noscat` checkout.
@@ -81,11 +91,19 @@ layer stays native Kotlin instead of a cross-platform framework.
 
 ## Commands (verified)
 
-Native bridge: cross-compile the published `noscat-ffi` crate for arm64, strip,
-and regenerate the Kotlin bindings (a few minutes on a warm cache):
+Native bridge: cross-compile `noscat-ffi` for arm64 (from the local noscat checkout,
+or a published version), strip, and regenerate the Kotlin bindings (a few minutes
+on a warm cache). The Rust build is the debug profile; switching it to release is a
+0.5.0 release item.
 
 ```
 ./scripts/build-native.sh local    # or a version number for a published crate
+```
+
+Install on a device (wireless debugging works; `adb` is not on PATH):
+
+```
+~/Android/Sdk/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Kotlin: build the app with the Gradle wrapper (committed). The host has no system
@@ -130,15 +148,15 @@ Kotlin bindings regenerate with it.
 - Members advertise inside the group every two minutes (the client does this). On
   network change (Wi-Fi to cellular) call `networkChanged()` and expect connections
   to drop (`Event.TunnelClosed`) and come back on next use.
-- Background survival needs a foreground service (`FOREGROUND_SERVICE` permission is
-  already in the manifest); without one, Android kills the UDP sockets when the app
-  is backgrounded.
+- Background survival needs the foreground service (`NoscatService`, started from
+  `MainActivity`); without it, Android kills the UDP sockets when the app is
+  backgrounded.
 - File transfers complete asynchronously: `sendFile` returns immediately; progress,
   success, and failure arrive as `TransferProgress` / `TransferDone` /
   `TransferFailed` events. Inbound files land in the app inbox automatically.
 - Chat is asynchronous too: sends (`sendChat`, `sendClipboard`) are
   fire-and-forget; the optimistic bubble is marked delivered by the
-  `ChatDelivered` event (the peer's FIN echo), never by the call returning.
+  `ChatDelivered` event (the member acknowledged it), never by the call returning.
   Failure surfaces as `ChatFailed`. Incoming messages arrive as
   `ChatMessage`.
 - An outgoing send can be cancelled: `cancelTransfer(path, peer)` stops it
@@ -155,3 +173,4 @@ Kotlin bindings regenerate with it.
 - Commit messages: imperative, no em dashes.
 - When Gradle work happens, prefer lockfiles and pinned versions so builds are
   reproducible from a clean checkout.
+- Work on `master`; commit and push there. No tags until the 0.5.0 release.

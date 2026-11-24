@@ -326,7 +326,7 @@ private fun Root(modifier: Modifier = Modifier) {
 
 // ---------------------------------------------------------------- join
 
-/** Step 1 of joining: pick the owner to ask. */
+/** Step 1 of joining: pick the mesh device to ask. */
 @Composable
 private fun JoinScreen(onJoined: (String) -> Unit) {
     val context = LocalContext.current
@@ -364,8 +364,8 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                 color = MaterialTheme.colorScheme.primary,
             )
             Text(
-                "Ask the device that owns your mesh for access. " +
-                    "Its QR appears when 'noscat up --mesh' starts.",
+                "Ask a device in your mesh for access. " +
+                    "Its QR appears when 'noscat up' starts (or run 'noscat id').",
                 style = MaterialTheme.typography.bodyMedium,
             )
 
@@ -374,13 +374,13 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                     qrScanner.launch(
                         ScanOptions()
                             .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                            .setPrompt("scan the owner device's QR")
+                            .setPrompt("scan the QR of a device in the mesh")
                             .setBeepEnabled(false)
                             .setOrientationLocked(true),
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Scan the owner's QR") }
+            ) { Text("Scan a mesh device's QR") }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 HorizontalDivider(Modifier.weight(1f))
@@ -395,7 +395,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
             OutlinedTextField(
                 value = ownerField,
                 onValueChange = { ownerField = it.trim() },
-                label = { Text("Paste the owner npub") },
+                label = { Text("Paste a mesh device's npub") },
                 placeholder = { Text("npub1...") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
@@ -411,17 +411,18 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Use this owner") }
+            ) { Text("Use this device") }
         }
         return
     }
 
-    // Step 2: automatic. Publish this phone's key package (addressed to the
-    // owner) and wait for their invitation - the phone joins by itself once
-    // the owner approves, then the client restarts on the mesh identity.
+    // Step 2: automatic. meshJoin runs the device, sends the scanned
+    // device a join request and waits for its invitation - the phone joins
+    // by itself once that device approves, then the client restarts on the
+    // mesh identity.
     LaunchedEffect(ownerNpub, attempt) {
-        // The FFI (0.4.0) requires the owner's npub: it refuses invites
-        // from anyone else, and a mesh owned by anyone else.
+        // The scanned device is the trust anchor: invitations from anyone
+        // else are refused. (ownerNpub is that device; the name is 0.4's.)
         val owner = ownerNpub ?: return@LaunchedEffect
         failed = false
         val republish = launch {
@@ -475,7 +476,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                 color = MaterialTheme.colorScheme.error,
             )
             Text(
-                "Make sure the owner device is running 'noscat up --mesh' and approves this phone.",
+                "Make sure that device is running 'noscat up' and approves this phone (the invite line it prints, or 'noscat up --accept-joins').",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -489,16 +490,16 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                     deviceNpub = null
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Change owner") }
+            ) { Text("Change device") }
         } else {
             Text("Joining", style = MaterialTheme.typography.headlineSmall)
             CircularProgressIndicator(Modifier.size(48.dp))
             Text(
-                "Waiting for the owner to approve",
+                "Waiting for an invite",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "On the owner device, answer 'y' when it asks to accept this phone.",
+                "That device shows a join request; approve it there with the invite line it prints.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -603,8 +604,8 @@ private fun DevicesScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             list.isEmpty() -> Text(
-                "no other devices in this mesh yet. have another device " +
-                    "scan this phone's QR code, or scan the owner's code to join",
+                "no other devices in this mesh yet. add one from a computer " +
+                    "in the mesh with 'noscat up' and the invite line it prints",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1023,7 +1024,7 @@ private fun SettingsScreen(onDisconnect: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmDisconnect = false },
             title = { Text("Disconnect from the mesh?") },
-            text = { Text("You can rejoin later by scanning the owner's QR again.") },
+            text = { Text("You can rejoin later by scanning a mesh device's QR again.") },
             confirmButton = {
                 Button(onClick = {
                     confirmDisconnect = false
@@ -1074,7 +1075,7 @@ private fun ConnectionChip(connected: Boolean, onDisconnect: (() -> Unit)? = nul
         AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("Disconnect from the mesh?") },
-            text = { Text("You can rejoin later by scanning the owner's QR again.") },
+            text = { Text("You can rejoin later by scanning a mesh device's QR again.") },
             confirmButton = {
                 Button(onClick = {
                     confirm = false
@@ -1088,7 +1089,7 @@ private fun ConnectionChip(connected: Boolean, onDisconnect: (() -> Unit)? = nul
     }
 }
 
-/** One mesh device: address, owner badge, selection. */
+/** One mesh device: name, presence, selection. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceCard(
@@ -1482,8 +1483,8 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
                                 )
                                 if (m.outgoing) {
                                     // Delivery state: pending (sent, no echo
-                                    // yet), a tick once the peer's delivery
-                                    // FIN came back, red when it never did.
+                                    // yet), a tick once the member
+                                    // acknowledged it, red when it never did.
                                     Text(
                                         when {
                                             m.failed -> "not delivered"

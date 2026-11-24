@@ -258,7 +258,7 @@ object ClientHolder {
         val text: String,
         val outgoing: Boolean,
         val failed: Boolean = false,
-        /** Outgoing only: the send path returned without error (FIN echoed). */
+        /** Outgoing only: the member acknowledged it (ChatDelivered). */
         val delivered: Boolean = false,
         val at: Long = System.currentTimeMillis(),
     )
@@ -311,10 +311,10 @@ object ClientHolder {
     /**
      * Starts (or returns) the running client. Blocking FFI call, so run it off
      * the main thread. Returns null and logs when the native side fails.
-     * `meshDir` scopes tunnels to a mesh group (PSK auth) - pass the
-     * joined device directory, or null for bare (non-mesh) tunnels. With a
-     * mesh, the client also runs node mode: inbound files land in the app
-     * inbox on their own, and chat messages arrive as events - no arming.
+     * `meshDir` is the joined device directory (its mesh decides who can
+     * reach this phone), or null before joining. With a mesh, the client
+     * also runs node mode: inbound files land in the app inbox on their
+     * own, and chat messages arrive as events - no arming.
      */
     @Synchronized
     fun getOrStart(secretHex: String?, meshDir: String? = null): NoscatClient? {
@@ -421,7 +421,7 @@ object ClientHolder {
                 unread[event.peer] = (unread[event.peer] ?: 0) + 1
             }
             is Event.ChatDelivered -> {
-                // The peer echoed the delivery FIN: mark the newest
+                // The member acknowledged it: mark the newest
                 // optimistic bubble. Also completes a clipboard share,
                 // which rides the same wire shape.
                 val msgs = chats[event.peer]
@@ -567,7 +567,7 @@ object ClientHolder {
 
     /** Share this device's clipboard text with a peer: it becomes the
      * clipboard on the receiving device. Delivery confirmation (the
-     * peer's FIN echo) arrives as ChatDelivered, which completes the
+     * member's acknowledgement) arrives as ChatDelivered, which completes the
      * pending share with a toast. */
     fun sendClipboard(peer: String, text: String) {
         val c = client ?: run { logLine("clipboard send aborted: client is not running"); return }
