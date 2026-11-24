@@ -11,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import androidx.compose.runtime.getValue
 import uniffi.noscat.MeshMember
+import uniffi.noscat.meshLeave
 import uniffi.noscat.meshMembers
 import uniffi.noscat.meshSync
 import androidx.compose.runtime.mutableStateListOf
@@ -34,8 +35,14 @@ object ClientHolder {
     /** One line per client event, newest first (Compose observable). */
     val log = mutableStateListOf<String>()
 
-    /** The running client, or null while (re)starting. */
-    var client: NoscatClient? = null
+    /** The running client, or null while (re)starting or disconnected
+     * (Compose observable). */
+    var client: NoscatClient? by mutableStateOf(null)
+        private set
+
+    /** Disconnected on purpose: a member, but not running until the user
+     * reconnects (Compose observable). */
+    var offline by mutableStateOf(false)
         private set
 
     /** This device's npub, read off the main thread once at start: even a
@@ -133,6 +140,9 @@ object ClientHolder {
      */
     fun syncRoster(waitSecs: ULong = 5uL) {
         val dir = meshDir ?: return
+        // meshSync would run the device just for the call: never while
+        // disconnected (or mid-forget).
+        if (client == null) return
         if (!syncBusy.compareAndSet(false, true)) return
         val gen = syncGen.get()
         syncing = true
@@ -286,6 +296,8 @@ object ClientHolder {
                 null
             }
         }
+        offline = dir != null && AppPrefs.disconnected(context)
+        if (offline) return null
         val secret = when {
             dir != null -> File(dir, "identity.nsec").readText().trim()
             else -> IdentityStore.load(context) ?: generateIdentity().secretHex.also {
@@ -602,7 +614,7 @@ object ClientHolder {
     fun cancelForward(id: ULong) {
         val c = client ?: return
         Thread {
-            val ok = c.cancelForward(id)
+            val ok = runCatching { c.cancelForward(id) }.getOrDefault(false)
             logLine(
                 if (ok) "cancelling forward $id" else "forward $id already gone",
             )
@@ -627,7 +639,7 @@ object ClientHolder {
     fun cancelTransfer(path: String, peer: String) {
         val c = client ?: return
         Thread {
-            val ok = c.cancelTransfer(path, peer)
+            val ok = runCatching { c.cancelTransfer(path, peer) }.getOrDefault(false)
             logLine(
                 if (ok) "cancelling transfer of ${File(path).name}"
                 else "transfer already finished",
@@ -665,14 +677,86 @@ object ClientHolder {
     }
 
     /**
+     * Stop the client now, not whenever the garbage collector gets to it:
+     * close() frees the native client, which stops the device and frees
+     * its directory for the next client.
+     */
+    private fun closeClient() {
+        val c = client ?: return
+        client = null
+        logLine("client stopped")
+        runCatching { c.close() }
+    }
+
+    /**
+     * Disconnect: stop the client but stay a member. The device dir and
+     * the cached roster stay, so [reconnect] resumes as the same device.
+     */
+    @Synchronized
+    fun disconnect(context: Context) {
+        AppPrefs.setDisconnected(context, true)
+        offline = true
+        syncGen.incrementAndGet() // stop the roster sync loop
+        closeClient()
+        meshDir = null
+        nodeUp = false
+        syncing = false
+        forwards.clear()
+        pendingClipboard.clear()
+        main.post { liveTunnels.clear() }
+    }
+
+    /** Undo [disconnect]: run the device again. Blocking. */
+    fun reconnect(context: Context): NoscatClient? {
+        AppPrefs.setDisconnected(context, false)
+        offline = false
+        return startFromPrefs(context)
+    }
+
+    /**
+     * Forget the mesh: leave it (the other members remove this phone; with
+     * none online in 30 seconds it forgets locally and the next member to
+     * come online completes the removal), then delete the device dir and
+     * the cached roster, so joining again starts as a new device. Received
+     * files stay. Blocking. Returns null on success, or why leaving failed
+     * (then nothing is deleted).
+     */
+    fun forget(context: Context): String? {
+        val dir = AppPrefs.meshDir(context)
+        if (dir != null && File(dir).exists()) {
+            // Runs on the app's client, or on a device started just for
+            // the call when disconnected.
+            val err = runCatching { meshLeave(dir, 30uL, null) }.exceptionOrNull()
+            if (err != null && "not in a mesh" !in err.toString()) {
+                logLine("leaving failed: $err")
+                return err.message ?: err.toString()
+            }
+        }
+        disconnect(context)
+        // A roster sync still in flight holds the device; let it finish
+        // before deleting the directory under it.
+        repeat(100) { if (syncBusy.get()) Thread.sleep(100) }
+        roster = null
+        runCatching { rosterFile.delete() }
+        dir?.let { File(it).deleteRecursively() }
+        AppPrefs.setMeshDir(context, null)
+        AppPrefs.setDisconnected(context, false)
+        offline = false
+        main.post {
+            chats.clear()
+            unread.clear()
+        }
+        logLine("left the mesh; device data deleted")
+        return null
+    }
+
+    /**
      * Stops the running client and starts a new one with the given config.
-     * Dropping the UniFFI object tears down its runtime and sockets.
      */
     @Synchronized
     fun restart(secretHex: String?, meshDir: String?): NoscatClient? {
-        if (client != null) logLine("client stopped")
         syncGen.incrementAndGet() // stop any roster sync loop
-        client = null
+        closeClient()
         myNpub = null
         nodeUp = false
         syncing = false
@@ -690,8 +774,8 @@ object ClientHolder {
      */
     @Synchronized
     fun restartFromPrefs(context: Context): NoscatClient? {
-        if (client != null) logLine("client stopped")
-        client = null
+        syncGen.incrementAndGet()
+        closeClient()
         roster = null
         return startFromPrefs(context)
     }

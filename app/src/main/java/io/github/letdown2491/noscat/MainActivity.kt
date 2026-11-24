@@ -198,10 +198,14 @@ private fun Root(modifier: Modifier = Modifier) {
             if (tab == "files") seenInbox = ClientHolder.inboxVersion
         }
         val newFiles = ClientHolder.inboxVersion - seenInbox
-        // Leave the mesh: forget the join, restart standalone, and drop
-        // back to the join flow. Shared by every screen's chip.
+        // Go offline but stay a member; the chip or Settings reconnects.
+        // Shared by every screen's chip.
         val disconnect: () -> Unit = {
-            AppPrefs.setMeshDir(context, null)
+            scope.launch { withContext(Dispatchers.IO) { ClientHolder.disconnect(context) } }
+        }
+        // After Forget (the mesh is left and the device deleted): run
+        // standalone and drop back to the join flow.
+        val forgotten: () -> Unit = {
             scope.launch {
                 val secret = withContext(Dispatchers.IO) {
                     IdentityStore.load(context) ?: generateIdentity().secretHex.also {
@@ -298,7 +302,7 @@ private fun Root(modifier: Modifier = Modifier) {
                 when (tab) {
                     "files" -> FilesScreen(onDisconnect = disconnect)
                     "services" -> ServicesScreen(onDisconnect = disconnect)
-                    "settings" -> SettingsScreen(onDisconnect = disconnect)
+                    "settings" -> SettingsScreen(onDisconnect = disconnect, onForgotten = forgotten)
                     "devices" -> DevicesScreen(
                         meshDir = meshDir!!,
                         onOpenChat = { npub ->
@@ -902,10 +906,13 @@ private fun FilesScreen(onDisconnect: () -> Unit) {
  * connection chip (click it), not here.
  */
 @Composable
-private fun SettingsScreen(onDisconnect: () -> Unit) {
+private fun SettingsScreen(onDisconnect: () -> Unit, onForgotten: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var confirmDisconnect by remember { mutableStateOf(false) }
+    var confirmForget by remember { mutableStateOf(false) }
+    var forgetting by remember { mutableStateOf(false) }
+    var forgetError by remember { mutableStateOf<String?>(null) }
 
     // Device name: what peers see in their rosters and chats. Empty falls
     // back to the phone model. Saving restarts the node to re-advertise.
@@ -1006,25 +1013,90 @@ private fun SettingsScreen(onDisconnect: () -> Unit) {
             toast(context, "log copied")
         }) { Text("Copy log") }
 
-        // Disconnect: also on the connection chip; repeated here so the
-        // support answer "Settings > Disconnect" always works.
+        // Disconnect / reconnect: also on the connection chip; repeated
+        // here so the support answer "Settings > Disconnect" always works.
         Spacer(Modifier.height(8.dp))
         HorizontalDivider()
-        Button(
-            onClick = { confirmDisconnect = true },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
+        if (ClientHolder.offline) {
+            Button(
+                onClick = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) { ClientHolder.reconnect(context) }
+                    }
+                },
+                enabled = !forgetting,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Reconnect to mesh") }
+        } else {
+            Button(
+                onClick = { confirmDisconnect = true },
+                enabled = !forgetting,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Disconnect from mesh") }
+        }
+        // Forget: leave for good. Works while disconnected too.
+        OutlinedButton(
+            onClick = { forgetError = null; confirmForget = true },
+            enabled = !forgetting,
+            colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = MaterialTheme.colorScheme.error,
             ),
             modifier = Modifier.fillMaxWidth(),
-        ) { Text("Disconnect from mesh") }
+        ) {
+            if (forgetting) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Leaving the mesh...")
+            } else {
+                Text("Forget mesh")
+            }
+        }
+        forgetError?.let {
+            Text(
+                "Could not leave the mesh ($it). Nothing was deleted; try again when online.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+
+    if (confirmForget) {
+        AlertDialog(
+            onDismissRequest = { confirmForget = false },
+            title = { Text("Forget this mesh?") },
+            text = {
+                Text(
+                    "The other devices remove this phone from the mesh, and its " +
+                        "identity and mesh data are deleted here. Received files stay. " +
+                        "To come back, join again as a new device.",
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmForget = false
+                    forgetting = true
+                    scope.launch {
+                        val err = withContext(Dispatchers.IO) { ClientHolder.forget(context) }
+                        forgetting = false
+                        if (err == null) onForgotten() else forgetError = err
+                    }
+                }) { Text("Forget") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { confirmForget = false }) { Text("Cancel") }
+            },
+        )
     }
 
     if (confirmDisconnect) {
         AlertDialog(
             onDismissRequest = { confirmDisconnect = false },
             title = { Text("Disconnect from the mesh?") },
-            text = { Text("You can rejoin later by scanning a mesh device's QR again.") },
+            text = { Text(DISCONNECT_TEXT) },
             confirmButton = {
                 Button(onClick = {
                     confirmDisconnect = false
@@ -1038,10 +1110,18 @@ private fun SettingsScreen(onDisconnect: () -> Unit) {
     }
 }
 
-/** Connected indicator in the top bar. Clicking it offers disconnect: the
- * pill shows the connection, so it acts on the connection too. */
+private const val DISCONNECT_TEXT =
+    "This phone goes offline but stays in the mesh; reconnect any time. " +
+        "To leave the mesh for good, use Forget mesh in Settings."
+
+/** Connected indicator in the top bar. Clicking it offers disconnect, or
+ * reconnect while disconnected: the pill shows the connection, so it acts
+ * on the connection too. */
 @Composable
 private fun ConnectionChip(connected: Boolean, onDisconnect: (() -> Unit)? = null) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val offline = ClientHolder.offline
     var confirm by remember { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1054,7 +1134,7 @@ private fun ConnectionChip(connected: Boolean, onDisconnect: (() -> Unit)? = nul
                 },
                 CircleShape,
             )
-            .clickable(enabled = connected && onDisconnect != null) { confirm = true }
+            .clickable(enabled = (connected || offline) && onDisconnect != null) { confirm = true }
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         Box(
@@ -1067,15 +1147,36 @@ private fun ConnectionChip(connected: Boolean, onDisconnect: (() -> Unit)? = nul
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            if (connected) "Connected" else "Connecting",
+            when {
+                connected -> "Connected"
+                offline -> "Disconnected"
+                else -> "Connecting"
+            },
             style = MaterialTheme.typography.labelMedium,
         )
     }
-    if (confirm) {
+    if (confirm && offline) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Reconnect to the mesh?") },
+            text = { Text("This phone comes back online as the same device.") },
+            confirmButton = {
+                Button(onClick = {
+                    confirm = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) { ClientHolder.reconnect(context) }
+                    }
+                }) { Text("Reconnect") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { confirm = false }) { Text("Cancel") }
+            },
+        )
+    } else if (confirm) {
         AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("Disconnect from the mesh?") },
-            text = { Text("You can rejoin later by scanning a mesh device's QR again.") },
+            text = { Text(DISCONNECT_TEXT) },
             confirmButton = {
                 Button(onClick = {
                     confirm = false

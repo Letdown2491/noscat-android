@@ -58,10 +58,15 @@ layer stays native Kotlin instead of a cross-platform framework.
   port forwards this phone is running, each stoppable; expose joins this
   tab in phase 2), Settings (status, device name, diagnostics). Disconnect
   lives on the connection chip itself (click it, on any tab's header) plus
-  a button in Settings, both behind a confirm dialog. It only forgets the
-  mesh locally (clears the `device_dir` pref and restarts standalone): it
-  does not call `meshLeave`, so the device stays a member, and its
-  `filesDir/device` state is kept.
+  a button in Settings, both behind a confirm dialog. Disconnect keeps the
+  phone a member: `ClientHolder.disconnect` closes the client and sets the
+  `disconnected` pref, so it stays offline across restarts until Reconnect
+  (chip or Settings). Forget mesh (Settings) is `ClientHolder.forget`:
+  `meshLeave` (30 s; with no member online it forgets locally and the next
+  member online completes the removal), then it deletes `filesDir/device`
+  and `members.json` and drops to the join flow. If leaving fails, nothing
+  is deleted. Clients are stopped with `close()`, never left to the
+  garbage collector: a collected-later client still holds the directory.
   `ClientHolder.kt` owns the running client and exposes client lifetime,
   roster cache, chat history, unread counts, forwards, and transfer state
   as Compose snapshot state.

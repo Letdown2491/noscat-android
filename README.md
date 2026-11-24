@@ -27,9 +27,12 @@ CLI does that.
 Every mesh needs one member reachable from the internet; on one Wi-Fi network,
 devices find each other directly.
 
-**Disconnect** (connection chip or Settings) only makes this phone forget the
-mesh locally; it stays a member until another device removes it
-(`noscat mesh remove <npub>`).
+**Disconnect** (connection chip or Settings) takes the phone offline but keeps
+it in the mesh, even across restarts; **Reconnect** brings it back as the same
+device. **Forget mesh** (Settings) asks the other members to remove the phone,
+then deletes its identity and mesh data (received files stay); to come back,
+join again as a new device. If no member is online, the removal completes when
+one next comes online.
 
 ## Building
 

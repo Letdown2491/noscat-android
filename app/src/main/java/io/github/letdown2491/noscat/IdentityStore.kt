@@ -82,6 +82,19 @@ object AppPrefs {
             .edit().putString(KEY_MESH, path).commit()
     }
 
+    private const val KEY_DISCONNECTED = "disconnected"
+
+    /** The user disconnected: stay a member but do not run the client
+     * until they reconnect (survives app restarts). */
+    fun disconnected(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_DISCONNECTED, false)
+
+    fun setDisconnected(context: Context, value: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_DISCONNECTED, value).commit()
+    }
+
     private const val KEY_DEVICE_NAME = "device_name"
 
     /** The user-chosen device name, or null (fall back to the model). */
