@@ -52,8 +52,9 @@ layer stays native Kotlin instead of a cross-platform framework.
 
 - `app/` - the Android app. `MainActivity.kt` holds the screens: the join flow
   (mesh invite by QR), and a five-tab layout with Devices in the center and
-  slightly larger: Chat (conversation list and bubbles), Files (inbox plus
-  live transfer progress), Devices (roster with per-row actions in the
+  slightly larger: Chat (conversation list and bubbles), Files (Received:
+  the inbox with each file's sender; Sent: the last 100 sends with Send
+  again; progress bars both ways), Devices (roster with per-row actions in the
   desktop app's order: chat, send-file, forward, clipboard), Services (the
   port forwards this phone is running, each stoppable; expose joins this
   tab in phase 2), Settings (status, device name, diagnostics). Disconnect
@@ -156,9 +157,13 @@ Kotlin bindings regenerate with it.
 - Background survival needs the foreground service (`NoscatService`, started from
   `MainActivity`); without it, Android kills the UDP sockets when the app is
   backgrounded.
-- File transfers complete asynchronously: `sendFile` returns immediately; progress,
-  success, and failure arrive as `TransferProgress` / `TransferDone` /
-  `TransferFailed` events. Inbound files land in the app inbox automatically.
+- File transfers complete asynchronously: `sendFile` returns the transfer id;
+  `TransferStarted`, `TransferProgress` (both directions) and the outcome
+  arrive as events carrying it. `ClientHolder.transfers` keeps them, with the
+  history in `noBackupFilesDir/transfers.json` (cleared by Forget mesh).
+  Inbound files land in the app inbox automatically.
+- A rename in Settings calls `ClientHolder.rename`: saved to prefs and sent
+  to the running client (`setDeviceName`), no restart.
 - Chat is asynchronous too: sends (`sendChat`, `sendClipboard`) are
   fire-and-forget; the optimistic bubble is marked delivered by the
   `ChatDelivered` event (the member acknowledged it), never by the call returning.

@@ -19,6 +19,7 @@ class NoscatService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground(NOTIFICATION_ID, buildNotification())
+        ClientHolder.init(this)
         thread(name = "noscat-service-start") {
             ClientHolder.startFromPrefs(this)
         }

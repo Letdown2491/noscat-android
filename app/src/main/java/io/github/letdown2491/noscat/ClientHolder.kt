@@ -51,9 +51,10 @@ object ClientHolder {
     var myNpub: String? by mutableStateOf(null)
         private set
 
-    /** An active file transfer, for the progress card on the devices screen. */
-    var transfer: TransferState? by mutableStateOf(null)
-        private set
+    /** Transfers, oldest first: this run's live ones plus the saved
+     * history (the Sent list, and who sent each received file). Main
+     * thread only. */
+    val transfers = mutableStateListOf<TransferEntry>()
 
     /** Increments whenever a received file lands, so the inbox re-lists. */
     var inboxVersion by mutableStateOf(0)
@@ -250,18 +251,117 @@ object ClientHolder {
     private val main = Handler(Looper.getMainLooper())
     private var appContext: Context? = null
 
-    /** A file transfer in flight (sends carry live progress; receives wait). */
-    data class TransferState(
-        val name: String,
+    /** How a transfer stands. */
+    enum class TransferStatus { ACTIVE, DONE, PARTIAL, FAILED, CANCELLED }
+
+    /** A file transfer, either direction, live or from the history. */
+    data class TransferEntry(
+        /** The client's transfer id. Ids restart with every client, so
+         * events only ever match a [live] entry. */
+        val id: Long,
+        val live: Boolean,
         val peer: String,
-        val path: String,
+        val name: String,
+        /** Source of a send; the final file of a finished receive. */
+        val path: String?,
+        val incoming: Boolean,
         val sent: Long,
         val total: Long,
-        val incoming: Boolean,
+        val status: TransferStatus,
+        val at: Long = System.currentTimeMillis(),
     ) {
         val percent: Int
             get() = if (total <= 0) 0 else ((sent * 100 / total).coerceAtMost(100)).toInt()
+
+        fun toJson(): JSONObject = JSONObject()
+            .put("id", id).put("peer", peer).put("name", name).put("path", path ?: JSONObject.NULL)
+            .put("incoming", incoming).put("sent", sent).put("total", total)
+            .put("status", status.name).put("at", at)
+
+        companion object {
+            fun fromJson(o: JSONObject) = TransferEntry(
+                id = o.getLong("id"),
+                live = false,
+                peer = o.getString("peer"),
+                name = o.getString("name"),
+                path = if (o.isNull("path")) null else o.getString("path"),
+                incoming = o.getBoolean("incoming"),
+                sent = o.getLong("sent"),
+                total = o.getLong("total"),
+                // Whatever was running when the app last stopped did not finish.
+                status = TransferStatus.valueOf(o.getString("status"))
+                    .let { if (it == TransferStatus.ACTIVE) TransferStatus.FAILED else it },
+                at = o.getLong("at"),
+            )
+        }
     }
+
+    /** Sent entries kept in the history. */
+    const val SENT_KEEP = 100
+    /** Received entries kept (only to name the sender of inbox files). */
+    private const val RECEIVED_KEEP = 500
+
+    private fun transfersFile(): File? =
+        appContext?.let { File(it.noBackupFilesDir, "transfers.json") }
+
+    private fun loadTransfers() {
+        val f = transfersFile() ?: return
+        val list = runCatching {
+            val a = JSONArray(f.readText())
+            (0 until a.length()).map { TransferEntry.fromJson(a.getJSONObject(it)) }
+        }.getOrDefault(emptyList())
+        transfers.clear()
+        transfers.addAll(list)
+    }
+
+    /** Trim to the caps and save. Main thread. */
+    private fun persistTransfers() {
+        for ((incoming, keep) in listOf(false to SENT_KEEP, true to RECEIVED_KEEP)) {
+            var drop = transfers.count { it.incoming == incoming } - keep
+            if (drop <= 0) continue
+            val it = transfers.listIterator()
+            while (drop > 0 && it.hasNext()) {
+                val t = it.next()
+                if (t.incoming == incoming && t.status != TransferStatus.ACTIVE) {
+                    it.remove()
+                    drop--
+                }
+            }
+        }
+        val json = JSONArray().apply { transfers.forEach { put(it.toJson()) } }.toString()
+        val f = transfersFile() ?: return
+        Thread { runCatching { f.writeText(json) } }.start()
+    }
+
+    /** Update the live entry for a client transfer id (main thread). */
+    private fun updateLive(id: Long, change: (TransferEntry) -> TransferEntry): Boolean {
+        val i = transfers.indexOfLast { it.live && it.id == id }
+        if (i < 0) return false
+        transfers[i] = change(transfers[i])
+        return true
+    }
+
+    /** Rename this device: saved for the next start, and the running
+     * client tells the members now (no restart, connections stay up).
+     * Blocking: it publishes an advert. */
+    fun rename(context: Context, name: String) {
+        AppPrefs.setDeviceName(context, name)
+        val c = client ?: return
+        runCatching { c.setDeviceName(name) }
+            .onFailure { logLine("rename not sent: $it") }
+        syncRoster()
+    }
+
+    /** Clear the Sent history (active sends stay). */
+    fun clearSent() {
+        transfers.removeAll { !it.incoming && it.status != TransferStatus.ACTIVE }
+        persistTransfers()
+    }
+
+    /** Who sent an inbox file, when this app received it. */
+    fun senderOf(file: File): String? = transfers.lastOrNull {
+        it.incoming && it.status == TransferStatus.DONE && it.path == file.absolutePath
+    }?.peer
 
     /** One chat bubble. Outgoing messages are optimistic; failure marks them. */
     data class ChatMsg(
@@ -273,10 +373,14 @@ object ClientHolder {
         val at: Long = System.currentTimeMillis(),
     )
 
-    /** Call once from the activity so transfer outcomes can toast. */
+    /** Call before anything else, from the activity and the service (a
+     * sticky restart brings the service up without the activity). Only
+     * the first call loads state: a second must not drop live transfers. */
     fun init(context: Context) {
+        if (appContext != null) return
         appContext = context.applicationContext
         roster = loadRoster()
+        loadTransfers()
     }
 
     /**
@@ -401,32 +505,52 @@ object ClientHolder {
     /** Keeps the transfer progress and chat state in step with the events. */
     private fun onEventState(event: Event) {
         when (event) {
-            is Event.TransferProgress -> transfer = TransferState(
-                name = File(event.path).name,
-                peer = event.peer,
-                path = event.path,
-                sent = event.sent.toLong(),
-                total = event.total.toLong(),
-                incoming = false,
-            )
-            is Event.TransferDone -> {
-                transfer = null
+            is Event.TransferStarted -> main.post {
+                val id = event.id.toLong()
+                if (!updateLive(id) { it.copy(name = event.name, total = event.size.toLong()) }) {
+                    transfers.add(
+                        TransferEntry(
+                            id = id,
+                            live = true,
+                            peer = event.peer,
+                            name = event.name,
+                            path = event.path,
+                            incoming = event.incoming,
+                            sent = 0,
+                            total = event.size.toLong(),
+                            status = TransferStatus.ACTIVE,
+                        ),
+                    )
+                    persistTransfers()
+                }
+            }
+            is Event.TransferProgress -> main.post {
+                updateLive(event.id.toLong()) {
+                    it.copy(sent = event.sent.toLong(), total = event.total.toLong())
+                }
+            }
+            is Event.TransferDone -> main.post {
+                // A finished send, or a received file under its final name.
+                updateLive(event.id.toLong()) {
+                    it.copy(path = event.path, sent = it.total, status = TransferStatus.DONE)
+                }
+                persistTransfers()
                 inboxVersion++
             }
-            is Event.TransferFailed -> transfer = null
-            is Event.TransferPartial -> {
-                // A receive that ended without a verified whole file
-                // (0.4.1 honest reporting): the kept .noscat-part is a
-                // resume seed only, not a usable file, so no inbox bump.
-                transfer = null
-                logLine("transfer incomplete: ${File(event.path).name} (kept as a partial, resume by sending again)")
+            is Event.TransferFailed -> main.post {
+                updateLive(event.id.toLong()) { it.copy(status = TransferStatus.FAILED) }
+                persistTransfers()
             }
-            is Event.TransferCancelled -> {
-                transfer = null
-                logLine(
-                    "transfer cancelled: ${File(event.path).name} " +
-                        "(receiver keeps the partial)",
-                )
+            is Event.TransferPartial -> main.post {
+                // A receive that ended without a verified whole file: the
+                // kept .noscat-part is a resume seed only, not a usable
+                // file, so no inbox bump.
+                updateLive(event.id.toLong()) { it.copy(status = TransferStatus.PARTIAL) }
+                persistTransfers()
+            }
+            is Event.TransferCancelled -> main.post {
+                updateLive(event.id.toLong()) { it.copy(status = TransferStatus.CANCELLED) }
+                persistTransfers()
             }
             is Event.ChatMessage -> {
                 chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
@@ -556,25 +680,15 @@ object ClientHolder {
     fun sendFile(path: String, targetNpub: String) {
         val c = client ?: run { logLine("send aborted: client is not running"); return }
         val name = File(path).name
-        transfer = TransferState(
-            name = name,
-            peer = targetNpub,
-            path = path,
-            sent = 0,
-            total = 0,
-            incoming = false,
-        )
         logLine("sending $name to ${targetNpub.take(16)}...")
-        main.post {
-            Thread {
-                try {
-                    c.sendFile(path, targetNpub)
-                } catch (t: Throwable) {
-                    logLine("send failed to start: $t")
-                    transfer = null
-                }
-            }.start()
-        }
+        // The row appears with the TransferStarted event.
+        Thread {
+            try {
+                c.sendFile(path, targetNpub)
+            } catch (t: Throwable) {
+                logLine("send failed to start: $t")
+            }
+        }.start()
     }
 
     /** Share this device's clipboard text with a peer: it becomes the
@@ -745,6 +859,9 @@ object ClientHolder {
         main.post {
             chats.clear()
             unread.clear()
+            // The history names devices of the mesh just left.
+            transfers.clear()
+            persistTransfers()
         }
         logLine("left the mesh; device data deleted")
         return null
@@ -785,6 +902,8 @@ object ClientHolder {
         is Event.TunnelUp -> "tunnel up: ${event.peer}"
         is Event.TunnelClosed -> "tunnel closed: ${event.peer}" +
             (event.error?.let { " ($it)" } ?: "")
+        is Event.TransferStarted ->
+            (if (event.incoming) "receiving " else "sending ") + "${event.name} (${event.size} bytes)"
         is Event.TransferProgress ->
             "transfer ${event.sent * 100uL / maxOf(event.total, 1uL)}%: ${File(event.path).name}"
         is Event.TransferDone -> "transfer done: ${File(event.path).name} <- ${event.peer}"

@@ -20,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -719,7 +720,8 @@ private fun ServicesScreen(onDisconnect: () -> Unit) {
     }
 }
 
-/** Files: the inbox plus live transfer progress. */
+/** Files: Received (the inbox, with who sent each file) and Sent (the
+ * send history), each with its live transfers and progress on top. */
 @Composable
 private fun FilesScreen(onDisconnect: () -> Unit) {
     val context = LocalContext.current
@@ -756,72 +758,69 @@ private fun FilesScreen(onDisconnect: () -> Unit) {
                 ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
             }
 
-            // Live transfer progress (either direction).
-            ClientHolder.transfer?.let { t ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                if (t.incoming) "Receiving ${t.name}" else "Sending ${t.name}",
-                                style = MaterialTheme.typography.titleSmall,
-                                modifier = Modifier.weight(1f),
-                            )
-                            // Outgoing sends can be stopped (0.4.0
-                            // cancelTransfer); the receiver keeps its
-                            // resumable partial.
-                            if (!t.incoming) {
-                                TextButton(onClick = {
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) {
-                                            ClientHolder.cancelTransfer(t.path, t.peer)
-                                        }
-                                    }
-                                }) { Text("Stop") }
-                            }
-                        }
-                        if (!t.incoming && t.total > 0) {
-                            LinearProgressIndicator(
-                                progress = { t.percent / 100f },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Text(
-                                "${t.percent}%  (${t.sent / 1024} of ${t.total / 1024} KB)",
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        } else {
-                            LinearProgressIndicator(Modifier.fillMaxWidth())
-                        }
-                    }
+            // Received | Sent, each with its live transfers on top.
+            var side by rememberSaveable { mutableStateOf("received") }
+            val incoming = side == "received"
+            val transfers = ClientHolder.transfers
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                FilterChip(
+                    selected = incoming,
+                    onClick = { side = "received" },
+                    label = { Text("Received") },
+                )
+                FilterChip(
+                    selected = !incoming,
+                    onClick = { side = "sent" },
+                    label = { Text("Sent") },
+                )
+                Spacer(Modifier.weight(1f))
+                if (!incoming) {
+                    TextButton(
+                        enabled = transfers.any {
+                            !it.incoming && it.status != ClientHolder.TransferStatus.ACTIVE
+                        },
+                        onClick = { ClientHolder.clearSent() },
+                    ) { Text("Clear history") }
                 }
             }
 
-            // Received files land here on their own (node mode).
-            val files = inbox.value
-            if (files.isNotEmpty()) {
-                Text(
-                    "${files.size} file${if (files.size == 1) "" else "s"}, " +
-                        formatSize(files.sumOf { it.length() }),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            val roster = ClientHolder.roster
+            val nameOf = { npub: String ->
+                roster?.firstOrNull { it.npub == npub }?.let(::memberLabel) ?: "device"
             }
-            if (files.isEmpty()) {
-                Text(
-                    "nothing received yet. files sent to this phone land here " +
-                        "even when the app is closed, and tapping one opens it",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
+            // Sends of any state; receives only while they are under way
+            // (a finished one is an inbox file below).
+            val rows = transfers.asReversed().filter {
+                it.incoming == incoming &&
+                    (!incoming || (it.live && it.status != ClientHolder.TransferStatus.DONE))
+            }
+            rows.forEach { t -> TransferRow(t, nameOf(t.peer), scope) }
+
+            if (incoming) {
+                // Received files land here on their own (node mode).
+                val files = inbox.value
+                if (files.isNotEmpty()) {
+                    Text(
+                        "${files.size} file${if (files.size == 1) "" else "s"}, " +
+                            formatSize(files.sumOf { it.length() }),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (files.isEmpty() && rows.isEmpty()) {
+                    Text(
+                        "nothing received yet. files sent to this phone land here " +
+                            "even when the app is closed, and tapping one opens it",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 files.forEach { f ->
+                    val from = ClientHolder.senderOf(f)?.let(nameOf)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -847,9 +846,15 @@ private fun FilesScreen(onDisconnect: () -> Unit) {
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                formatSize(f.length()),
+                                listOfNotNull(
+                                    from?.let { "from $it" },
+                                    formatSize(f.length()),
+                                    whenText(f.lastModified()),
+                                ).joinToString(" · "),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                         IconButton(onClick = { confirmDelete = f }) {
@@ -861,6 +866,13 @@ private fun FilesScreen(onDisconnect: () -> Unit) {
                         }
                     }
                 }
+            } else if (rows.isEmpty()) {
+                Text(
+                    "nothing sent yet. send a file from a device on the Devices tab; " +
+                        "the last ${ClientHolder.SENT_KEEP} sends are kept here",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         SnackbarHost(
@@ -976,12 +988,10 @@ private fun SettingsScreen(onDisconnect: () -> Unit, onForgotten: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = {
-                    AppPrefs.setDeviceName(context, nameField.trim())
+                    val name = nameField.trim()
                     scope.launch {
-                        withContext(Dispatchers.IO) {
-                            ClientHolder.restartFromPrefs(context)
-                        }
-                        toast(context, "saved - node restarted")
+                        withContext(Dispatchers.IO) { ClientHolder.rename(context, name) }
+                        toast(context, "saved - members see it in a few seconds")
                     }
                 },
                 enabled = nameField.trim() != currentName,
@@ -1656,8 +1666,126 @@ private fun formatSize(bytes: Long): String = when {
  * is not inbox content. */
 private fun inboxFiles(context: Context): List<File> {
     val dir = context.getExternalFilesDir(null) ?: context.filesDir
-    return dir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() }
+    // Partials and their resume sidecars are not files yet.
+    return dir.listFiles()
+        ?.filter {
+            it.isFile && !it.name.startsWith(".") &&
+                !it.name.endsWith(".noscat-part") && !it.name.endsWith(".noscat-sha")
+        }
+        ?.sortedByDescending { it.lastModified() }
         ?: emptyList()
+}
+
+/** "14:05" today, "Nov 24, 2026" before. */
+private fun whenText(at: Long): String = android.text.format.DateUtils.formatSameDayTime(
+    at,
+    System.currentTimeMillis(),
+    java.text.DateFormat.MEDIUM,
+    java.text.DateFormat.SHORT,
+).toString()
+
+/** A send (any state) or a receive under way: progress while active,
+ * Stop for an active send, Send again for one that did not finish. */
+@Composable
+private fun TransferRow(
+    t: ClientHolder.TransferEntry,
+    peer: String,
+    scope: kotlinx.coroutines.CoroutineScope,
+) {
+    val active = t.status == ClientHolder.TransferStatus.ACTIVE
+    val (state, color) = when (t.status) {
+        ClientHolder.TransferStatus.ACTIVE ->
+            (if (t.sent == 0L) "connecting" else "${t.percent}%") to
+                MaterialTheme.colorScheme.onSurfaceVariant
+        ClientHolder.TransferStatus.DONE ->
+            (if (t.incoming) "received" else "delivered") to Color(0xFF22C55E)
+        // Incomplete is not a failure: sending the same file again resumes.
+        ClientHolder.TransferStatus.PARTIAL -> "partial, will resume" to Color(0xFFEAB308)
+        ClientHolder.TransferStatus.CANCELLED -> "stopped" to Color(0xFFEAB308)
+        ClientHolder.TransferStatus.FAILED -> "failed" to MaterialTheme.colorScheme.error
+    }
+    val size = if (active && t.total > 0) {
+        "${formatSize(t.sent)} of ${formatSize(t.total)}"
+    } else {
+        formatSize(t.total)
+    }
+    val path = t.path
+    val resendable = !t.incoming && !active && t.status != ClientHolder.TransferStatus.DONE &&
+        path != null && File(path).exists()
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (active) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    fileIcon(t.name),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 10.dp),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        t.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "${if (t.incoming) "from" else "to"} $peer · $size · ${whenText(t.at)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    state,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = color,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+            if (active) {
+                // Determinate once bytes move; a sweeping bar while it connects.
+                if (t.sent > 0 && t.total > 0) {
+                    LinearProgressIndicator(
+                        progress = { t.percent / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+            if ((active && !t.incoming) || resendable) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (active) {
+                        // The receiver keeps its resumable partial.
+                        TextButton(onClick = {
+                            scope.launch {
+                                withContext(Dispatchers.IO) {
+                                    ClientHolder.cancelTransfer(path ?: return@withContext, t.peer)
+                                }
+                            }
+                        }) { Text("Stop") }
+                    } else if (path != null) {
+                        TextButton(onClick = { ClientHolder.sendFile(path, t.peer) }) {
+                            Text("Send again")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /** Guess a MIME type from a file's extension ("" when unknown). */
