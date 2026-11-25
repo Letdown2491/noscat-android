@@ -997,7 +997,10 @@ object ClientHolder {
             // Runs on the app's client, or on a device started just for
             // the call when disconnected.
             val err = runCatching { meshLeave(dir, 30uL, null) }.exceptionOrNull()
-            if (err != null && "not in a mesh" !in err.toString()) {
+            // "is encrypted": sealed files whose key is gone. The device
+            // can never open, so never leave; delete it anyway (members
+            // still list it until one removes it).
+            if (err != null && "not in a mesh" !in err.toString() && "is encrypted" !in err.toString()) {
                 logLine("leaving failed: $err")
                 return err.message ?: err.toString()
             }
