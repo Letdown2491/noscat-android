@@ -18,6 +18,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.runtime.DisposableEffect
@@ -50,6 +52,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -1098,15 +1102,32 @@ private fun SettingsScreen(onDisconnect: () -> Unit, onForgotten: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        // Diagnostics: the event log, with copy for bug reports.
-        Text("Diagnostics", style = MaterialTheme.typography.titleMedium)
-        val lines = ClientHolder.log.take(40)
-        if (lines.isEmpty()) {
-            Text("no events yet", style = MaterialTheme.typography.bodySmall)
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                lines.forEach { line ->
-                    Text(line, style = MaterialTheme.typography.labelSmall)
+        // Diagnostics: the event log, collapsed until asked for (it is
+        // long and only useful for bug reports), with copy either way.
+        var showLog by rememberSaveable { mutableStateOf(false) }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showLog = !showLog },
+        ) {
+            Text("Diagnostics", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (showLog) "Hide" else "Show (${ClientHolder.log.size})",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (showLog) {
+            val lines = ClientHolder.log.take(40)
+            if (lines.isEmpty()) {
+                Text("no events yet", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    lines.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }
@@ -1576,7 +1597,9 @@ private fun ChatScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                else -> list.forEach { m ->
+                // Latest conversation first; devices never chatted with
+                // follow in the device order (a stable sort keeps it).
+                else -> list.sortedByDescending { ClientHolder.chatWith(it.npub).lastOrNull()?.at ?: 0L }.forEach { m ->
                     Card(
                         onClick = { onOpenPeer(m.npub) },
                         colors = CardDefaults.cardColors(
@@ -1631,7 +1654,10 @@ private fun ChatScreen(
     )
 }
 
-/** The thread with one device: bubbles plus a send box. */
+/** The thread with one device: bubbles plus a send box. Tap a message
+ * that was not delivered to send it again; long-press any message to
+ * delete it (or retry). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -1709,6 +1735,8 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
                             Arrangement.Start
                         },
                     ) {
+                        var menu by remember { mutableStateOf(false) }
+                        Box {
                         Surface(
                             color = when {
                                 m.failed -> MaterialTheme.colorScheme.errorContainer
@@ -1716,6 +1744,10 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
                                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
                             },
                             shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.combinedClickable(
+                                onClick = { if (m.failed) ClientHolder.retryChat(peer, m) },
+                                onLongClick = { menu = true },
+                            ),
                         ) {
                             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                                 Text(
@@ -1728,7 +1760,7 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
                                     // acknowledged it, red when it never did.
                                     Text(
                                         when {
-                                            m.failed -> "not delivered"
+                                            m.failed -> "not delivered · tap to retry"
                                             m.delivered -> "delivered ✓"
                                             else -> "sending…"
                                         },
@@ -1741,6 +1773,19 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
                                     )
                                 }
                             }
+                        }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            if (m.failed) {
+                                DropdownMenuItem(
+                                    text = { Text("Retry") },
+                                    onClick = { menu = false; ClientHolder.retryChat(peer, m) },
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                onClick = { menu = false; ClientHolder.deleteChat(peer, m) },
+                            )
+                        }
                         }
                     }
                 }

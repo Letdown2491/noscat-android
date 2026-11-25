@@ -196,7 +196,7 @@ object ClientHolder {
                             m
                         }
                     }
-                    roster = merged.filter { it.npub != myNpub }
+                    roster = merged.filter { it.npub != myNpub }.displayOrder()
                     cacheRoster(roster!!)
                 },
                 { if (gen == syncGen.get()) logLine("sync failed: ${it.message}") },
@@ -530,9 +530,53 @@ object ClientHolder {
             is IdentityStore.StorageKeyResult.Unreadable ->
                 logLine("storage key unreadable, the device files stay sealed: ${k.error}")
         }
-        roster = loadRoster()
+        roster = loadRoster()?.displayOrder()
         loadTransfers()
         loadChats()
+        watchNetwork(context.applicationContext)
+    }
+
+    /** The default network the client last saw, to tell a real switch
+     * (Wi-Fi to cellular and back) from repeat callbacks. */
+    private var lastNetwork: android.net.Network? = null
+    private var lastAddrs: Set<String?>? = null
+
+    /**
+     * Tell the client when the default network changes. Its paths and
+     * connections were made from the old address; without this they take
+     * minutes to time out (a chat sent right after turning Wi-Fi off
+     * failed, and the next one worked about two minutes later).
+     */
+    private fun watchNetwork(context: Context) {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        runCatching {
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    if (lastNetwork != null && lastNetwork != network) notifyNetworkChanged("switched network")
+                    if (lastNetwork != network) lastAddrs = null
+                    lastNetwork = network
+                }
+
+                override fun onLinkPropertiesChanged(
+                    network: android.net.Network,
+                    linkProperties: android.net.LinkProperties,
+                ) {
+                    // Same network, new addresses (a DHCP renewal, a new
+                    // IPv6 address). The first report after a switch or
+                    // at start only records them.
+                    if (network != lastNetwork) return
+                    val addrs = linkProperties.linkAddresses.map { it.address.hostAddress }.toSet()
+                    if (lastAddrs != null && lastAddrs != addrs) notifyNetworkChanged("addresses changed")
+                    lastAddrs = addrs
+                }
+            })
+        }.onFailure { logLine("cannot watch the network: $it") }
+    }
+
+    private fun notifyNetworkChanged(why: String) {
+        val c = client ?: return
+        logLine("network: $why")
+        Thread { runCatching { c.networkChanged() } }.start()
     }
 
     /**
@@ -747,9 +791,10 @@ object ClientHolder {
                 logLine("clipboard updated by ${event.peer.take(16)}... (${event.text.length} chars)")
             }
             is Event.ChatFailed -> {
-                // Mark the newest undelivered optimistic bubble.
+                // Mark the newest pending optimistic bubble (never one
+                // already delivered).
                 val msgs = chats[event.peer] ?: return
-                val idx = msgs.indexOfLast { it.outgoing && !it.failed }
+                val idx = msgs.indexOfLast { it.outgoing && !it.delivered && !it.failed }
                 if (idx >= 0) msgs[idx] = msgs[idx].copy(failed = true)
                 chatsChanged()
             }
@@ -942,12 +987,35 @@ object ClientHolder {
                 logLine("chat failed to start: $t")
                 main.post {
                     val msgs = chatWith(peer)
-                    val idx = msgs.indexOfLast { it.outgoing && !it.failed }
+                    val idx = msgs.indexOfLast { it.outgoing && !it.delivered && !it.failed }
                     if (idx >= 0) msgs[idx] = msgs[idx].copy(failed = true)
                     chatsChanged()
                 }
             }
         }.start()
+    }
+
+    /** Send a message that was not delivered again: the failed bubble
+     * goes, and the text is sent as a new message at the bottom. Never
+     * automatic: "not delivered" can mean the member got it but its
+     * acknowledgement was lost. */
+    fun retryChat(peer: String, msg: ChatMsg) {
+        if (client == null) {
+            toastShort("not connected")
+            return
+        }
+        chatWith(peer).remove(msg)
+        sendChat(peer, msg.text)
+    }
+
+    /** Remove one message from this phone's history (only here). */
+    fun deleteChat(peer: String, msg: ChatMsg) {
+        chatWith(peer).remove(msg)
+        chatsChanged()
+    }
+
+    private fun toastShort(text: String) {
+        appContext?.let { Toast.makeText(it, text, Toast.LENGTH_SHORT).show() }
     }
 
     /**
@@ -1095,3 +1163,17 @@ object ClientHolder {
         is Event.JoinRequest -> "${event.name ?: event.peer} asks to join the mesh"
     }
 }
+
+/**
+ * The order every noscat UI shows devices in (as noscat's members()): by
+ * name, case-insensitive, then devices with no name yet, ties by npub.
+ * Presence never reorders the list. Sorted here too because the roster
+ * keeps a cached name when a fetch comes back without one.
+ */
+fun List<MeshMember>.displayOrder(): List<MeshMember> = sortedWith(
+    compareBy<MeshMember>(
+        { it.name.isNullOrBlank() },
+        { it.name?.trim()?.lowercase() ?: "" },
+        { it.npub },
+    ),
+)
