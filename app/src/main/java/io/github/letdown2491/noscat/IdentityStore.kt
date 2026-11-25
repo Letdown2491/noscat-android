@@ -47,6 +47,47 @@ object IdentityStore {
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    private const val STORAGE_KEY = "storage-key"
+
+    /** What [storageKey] found. */
+    sealed interface StorageKeyResult {
+        data class Ok(val key: ByteArray) : StorageKeyResult
+        /** A wrapped key exists but the keystore cannot open it: the device
+         * files stay sealed, and only Forget mesh recovers. */
+        data class Unreadable(val error: Throwable) : StorageKeyResult
+    }
+
+    /**
+     * The 32-byte key noscat seals the device files with (identity and
+     * mesh state), wrapped by the Keystore AES key and kept in prefs.
+     * Created on first use. Never replaced when it cannot be read: a new
+     * key would not open the files the old one sealed.
+     */
+    fun storageKey(context: Context): StorageKeyResult {
+        val blob = prefs(context).getString(STORAGE_KEY, null)
+        if (blob != null) {
+            return runCatching {
+                val all = android.util.Base64.decode(blob, android.util.Base64.NO_WRAP)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                cipher.init(
+                    Cipher.DECRYPT_MODE,
+                    keystoreKey(),
+                    GCMParameterSpec(GCM_TAG_BITS, all.copyOfRange(0, IV_LEN)),
+                )
+                StorageKeyResult.Ok(cipher.doFinal(all.copyOfRange(IV_LEN, all.size)))
+            }.getOrElse { StorageKeyResult.Unreadable(it) }
+        }
+        val key = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, keystoreKey())
+        val ct = cipher.doFinal(key)
+        val iv = cipher.iv ?: error("keystore did not produce an IV")
+        prefs(context).edit()
+            .putString(STORAGE_KEY, android.util.Base64.encodeToString(iv + ct, android.util.Base64.NO_WRAP))
+            .commit()
+        return StorageKeyResult.Ok(key)
+    }
+
     private fun keystoreKey(): SecretKey {
         val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (ks.getKey(KEY, null) as? SecretKey)?.let { return it }

@@ -518,6 +518,14 @@ object ClientHolder {
     fun init(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
+        // Seal the device files (identity, mesh state) before anything
+        // touches the device dir; plain ones from before migrate.
+        when (val k = runCatching { IdentityStore.storageKey(context) }
+            .getOrElse { IdentityStore.StorageKeyResult.Unreadable(it) }) {
+            is IdentityStore.StorageKeyResult.Ok -> uniffi.noscat.setStorageKey(k.key)
+            is IdentityStore.StorageKeyResult.Unreadable ->
+                logLine("storage key unreadable, the device files stay sealed: ${k.error}")
+        }
         roster = loadRoster()
         loadTransfers()
         loadChats()
@@ -543,7 +551,9 @@ object ClientHolder {
         offline = dir != null && AppPrefs.disconnected(context)
         if (offline) return null
         val secret = when {
-            dir != null -> File(dir, "identity.nsec").readText().trim()
+            // The device dir's own identity: the client reads it (the file
+            // is sealed under the storage key, so the app never does).
+            dir != null -> null
             else -> IdentityStore.load(context) ?: generateIdentity().secretHex.also {
                 IdentityStore.save(context, it)
             }

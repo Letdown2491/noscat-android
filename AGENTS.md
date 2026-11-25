@@ -173,6 +173,14 @@ Kotlin bindings regenerate with it.
   join requests. Tapping one opens the chat or tab (`NavRequest`; the
   activity is singleTop). POST_NOTIFICATIONS is asked at first start.
   Foreground pop-ups name devices, never npubs (`nameOf`, `scrub`).
+- The device files (`identity.nsec`, `mesh-state.json`) are sealed at rest:
+  `ClientHolder.init` gets a 32-byte storage key from
+  `IdentityStore.storageKey` (random, wrapped by the Keystore AES key, kept
+  in prefs) and calls `setStorageKey` before anything touches the device
+  dir. Plain files migrate on start. The app never reads `identity.nsec`:
+  the client config passes no secret with a mesh dir. An unreadable key is
+  never replaced (a new one would not open the files); only Forget mesh
+  recovers.
 - Backup and device-to-device transfer are off (`allowBackup="false"`,
   `res/xml/data_extraction_rules.xml` excludes everything): a restored
   device dir would make two phones the same device with diverging mesh
