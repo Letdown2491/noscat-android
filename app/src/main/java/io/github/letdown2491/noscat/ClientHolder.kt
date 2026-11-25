@@ -78,7 +78,8 @@ object ClientHolder {
 
     /** Epoch ms when [roster]'s lastSeenSecs were measured (persisted
      * alongside the roster), so cached presence can be aged forward. */
-    private var rosterAgeBase = 0L
+    var rosterAgeBase = 0L
+        private set
 
     /** Refresh the cached roster (called after a successful member fetch). */
     fun cacheRoster(list: List<MeshMember>) {
@@ -122,6 +123,8 @@ object ClientHolder {
                 admin = m.optBoolean("admin", true),
                 thisDevice = m.optBoolean("thisDevice", false),
                 reachable = m.optBoolean("reachable", false),
+                // Live state, never saved: the running client says.
+                connected = false,
             )
         }
     }.getOrNull()
@@ -186,6 +189,7 @@ object ClientHolder {
                                 npub = m.npub,
                                 admin = m.admin,
                                 reachable = p.reachable || m.reachable,
+                                connected = m.connected,
                                 lastSeenSecs = p.lastSeenSecs?.let { it + elapsedSecs },
                             )
                         } else {

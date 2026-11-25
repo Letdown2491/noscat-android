@@ -99,6 +99,8 @@ import androidx.compose.runtime.remember
 import androidx.core.content.FileProvider
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -1313,9 +1315,14 @@ private fun DeviceCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         ) {
-            PresenceDot(
-                live = member.fresh() || ClientHolder.liveTunnels[member.npub] == true,
-            )
+            // Ticks so a silent peer's advert ages out while the list is open.
+            val now by androidx.compose.runtime.produceState(System.currentTimeMillis()) {
+                while (true) {
+                    delay(30_000)
+                    value = System.currentTimeMillis()
+                }
+            }
+            PresenceDot(member.presence(now))
             Spacer(Modifier.width(6.dp))
             // The name is the npub copy affordance: tap it and the full
             // npub is on the clipboard.
@@ -1380,25 +1387,48 @@ private fun DeviceCard(
  * minutes, so an advert younger than ten means the peer is up. */
 private const val ADVERT_TTL_SECS: ULong = 600uL
 
-/** Online per the mesh presence: the peer's advert is fresh (aged forward
- * from the cached roster, so it holds between syncs). */
-private fun MeshMember.fresh(): Boolean =
-    lastSeenSecs?.let { it < ADVERT_TTL_SECS } ?: false
+/** Online per the mesh presence: the peer's advert is fresh, aged forward
+ * from when the roster was read so a silent peer goes stale between syncs. */
+private fun MeshMember.fresh(nowMs: Long): Boolean {
+    val elapsed = ((nowMs - ClientHolder.rosterAgeBase).coerceAtLeast(0) / 1000).toULong()
+    return lastSeenSecs?.let { it + elapsed < ADVERT_TTL_SECS } ?: false
+}
 
-/** Live-tunnel presence dot: green while the peer looks online (fresh
- * advert) or has a tunnel open right now. */
+/** What a device's dot says. */
+private enum class Presence { Connected, Unreachable, Offline }
+
+/** Green: data reaches it now (a direct link or live connection). Amber:
+ * its advert arrives over the relays but nothing connects (another network
+ * with no reachable member). Red: offline. */
+private fun MeshMember.presence(nowMs: Long): Presence = when {
+    connected -> Presence.Connected
+    fresh(nowMs) -> Presence.Unreachable
+    else -> Presence.Offline
+}
+
+/** Presence dot: green connected, amber online but unreachable, red
+ * offline. Absence of color would read as "not loaded yet", so offline is
+ * stated outright. */
 @Composable
-/** Presence dot: green when the peer looks online (fresh advert or a
- * live tunnel), red when it does not. Absence of color would read as
- * "not loaded yet", so offline is stated outright. */
-private fun PresenceDot(live: Boolean) {
+private fun PresenceDot(presence: Presence) {
     Box(
         Modifier
             .size(8.dp)
             .background(
-                if (live) Color(0xFF2E7D32) else Color(0xFFB3261E),
+                when (presence) {
+                    Presence.Connected -> Color(0xFF2E7D32)
+                    Presence.Unreachable -> Color(0xFFF9A825)
+                    Presence.Offline -> Color(0xFFB3261E)
+                },
                 CircleShape,
-            ),
+            )
+            .semantics {
+                contentDescription = when (presence) {
+                    Presence.Connected -> "connected"
+                    Presence.Unreachable -> "online, can't connect"
+                    Presence.Offline -> "offline"
+                }
+            },
     )
 }
 
@@ -1422,7 +1452,7 @@ private fun SelfCard(name: String, npub: String) {
         ) {
             // You are online exactly when the node is: the app is running,
             // listening, and advertising.
-            PresenceDot(live = ClientHolder.client != null)
+            PresenceDot(if (ClientHolder.client != null) Presence.Connected else Presence.Offline)
             Spacer(Modifier.width(6.dp))
             Text(
                 name,

@@ -34,6 +34,13 @@ then deletes its identity and mesh data (received files stay); to come back,
 join again as a new device. If no member is online, the removal completes when
 one next comes online.
 
+## Presence
+
+Each device's dot says whether data can reach it: **green**, connected now;
+**amber**, online (its announcements arrive) but nothing can connect, usually
+because it is on another network and no member is reachable from the
+internet; **red**, offline.
+
 ## Building
 
 Two steps: the native bridge, then the app.

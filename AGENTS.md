@@ -76,9 +76,12 @@ layer stays native Kotlin instead of a cross-platform framework.
   `meshSync`/`meshMembers` read its members (names and `lastSeenSecs`
   presence) without a relay round trip; `ClientHolder` syncs on a 2
   minute timer, when listening starts, and on the `MeshJoined`,
-  `Roster`, `MemberSeen` and `MeshLeft` events. Presence is green while
-  the latest advert is under ten minutes old, aged forward between
-  syncs.
+  `Roster`, `MemberSeen` and `MeshLeft` events. The dot is green when
+  `MeshMember.connected` (a direct link or live connection; the client
+  re-dials online members every 30 s and emits `Roster` on every
+  connection change; never saved), amber when only the advert is fresh
+  (under ten minutes, aged forward from `rosterAgeBase` on a 30 s tick),
+  red otherwise.
   noscat 0.5 starts fresh: the device lives in `filesDir/device` (pref
   `device_dir`), and 0.4's `mesh` dir, `mesh_dir` pref and `roster.json`
   are never read. Inviting and creating a mesh from the phone need UI
