@@ -508,11 +508,11 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
         res.fold(
             { members ->
                 AppPrefs.setMeshDir(context, dir.absolutePath)
-                val secret = withContext(Dispatchers.IO) {
-                    File(dir, "identity.nsec").readText().trim()
-                }
+                // No secret: the client reads the device directory's own
+                // identity (the file is sealed under the storage key, so
+                // the app must never read it as text).
                 withContext(Dispatchers.IO) {
-                    ClientHolder.restart(secret, dir.absolutePath)
+                    ClientHolder.restart(null, dir.absolutePath)
                 }
                 ClientHolder.logLine("joined: ${members.size} device(s)")
                 onJoined(dir.absolutePath)
