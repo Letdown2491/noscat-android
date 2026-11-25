@@ -628,7 +628,7 @@ object ClientHolder {
      * `meshDir` is the joined device directory (its mesh decides who can
      * reach this phone), or null before joining. With a mesh, the client
      * also runs node mode: inbound files land in the app inbox on their
-     * own, and chat messages arrive as events - no arming.
+     * own, and chat messages arrive as events: no arming.
      */
     @Synchronized
     fun getOrStart(secretHex: String?, meshDir: String? = null): NoscatClient? {
@@ -1120,7 +1120,7 @@ object ClientHolder {
 
     /**
      * Restart on the config prefs currently hold (identity, mesh, device
-     * name) - for changes that only apply at client start, like a rename.
+     * name), for changes that only apply at client start, like a rename.
      */
     @Synchronized
     fun restartFromPrefs(context: Context): NoscatClient? {

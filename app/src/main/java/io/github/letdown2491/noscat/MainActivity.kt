@@ -434,7 +434,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
             )
             Text(
                 "Ask a device in your mesh for access. " +
-                    "Its QR appears when 'noscat up' starts (or run 'noscat id').",
+                    "Scan its QR: Settings in the apps, or 'noscat mesh qr' on a computer.",
                 style = MaterialTheme.typography.bodyMedium,
             )
 
@@ -487,7 +487,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
     }
 
     // Step 2: automatic. meshJoin runs the device, sends the scanned
-    // device a join request and waits for its invitation - the phone joins
+    // device a join request and waits for its invitation; the phone joins
     // by itself once that device approves, then the client restarts on the
     // mesh identity.
     LaunchedEffect(ownerNpub, attempt) {
@@ -546,7 +546,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                 color = MaterialTheme.colorScheme.error,
             )
             Text(
-                "Make sure that device is running and approves this phone: on its Devices page in the apps, or the invite line 'noscat up' prints.",
+                "Make sure that device is running and approves this phone: on its Devices page in the apps, the invite line 'noscat up' prints, or 'noscat mesh requests'.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -570,7 +570,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "That device shows a join request: approve it on its Devices page (or with the invite line 'noscat up' prints).",
+                "That device shows a join request: approve it on its Devices page (or with the invite line 'noscat up' prints, or 'noscat mesh requests').",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -748,7 +748,7 @@ private fun DevicesScreen(
     }
 }
 
-/** Services: the port forwards this phone is running - a peer's exposed
+/** Services: the port forwards this phone is running: a peer's exposed
  * service reaches this phone at localhost:<port>. The desktop app's
  * Services tab, dial-out half; expose (publishing this phone's services)
  * is phase 2. */
@@ -1090,7 +1090,7 @@ private fun SettingsScreen(onDisconnect: () -> Unit, onForgotten: () -> Unit) {
                     val name = nameField.trim()
                     scope.launch {
                         withContext(Dispatchers.IO) { ClientHolder.rename(context, name) }
-                        toast(context, "saved - members see it in a few seconds")
+                        toast(context, "saved, members see it in a few seconds")
                     }
                 },
                 enabled = nameField.trim() != currentName,
@@ -1461,7 +1461,7 @@ private fun PresenceDot(presence: Presence) {
 }
 
 /** This device, on the list too: copy your own npub from the same place
- * your peers' npubs live. No actions beyond that - it is you. */
+ * your peers' npubs live. No actions beyond that: it is you. */
 @Composable
 private fun SelfCard(name: String, npub: String) {
     val context = LocalContext.current
@@ -1706,7 +1706,7 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
                 Spacer(Modifier.weight(1f))
                 Text("no messages yet", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "say hi - messages go device to device, encrypted, peer to peer",
+                    "say hi: messages go device to device, encrypted, peer to peer",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
