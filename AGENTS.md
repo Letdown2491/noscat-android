@@ -164,6 +164,19 @@ Kotlin bindings regenerate with it.
   Inbound files land in the app inbox automatically.
 - A rename in Settings calls `ClientHolder.rename`: saved to prefs and sent
   to the running client (`setDeviceName`), no restart.
+- Join requests (`Event.JoinRequest`) wait in `ClientHolder.joinRequests`
+  and show as cards on Devices with the asker's short ID; Approve calls
+  `invite` off the main thread.
+- `Notifier` posts notifications on three channels (Messages, Files, Join
+  requests): chat unless that conversation is on screen in the foreground
+  (`visibleChat`, `inForeground`), files received in the background, and
+  join requests. Tapping one opens the chat or tab (`NavRequest`; the
+  activity is singleTop). POST_NOTIFICATIONS is asked at first start.
+  Foreground pop-ups name devices, never npubs (`nameOf`, `scrub`).
+- Chats persist in `noBackupFilesDir/chats.json` (500 per conversation,
+  saved debounced); Forget clears them.
+- Devices warns when no member is reachable from the internet
+  (`MeshMember.reachable`), once a member has been heard from.
 - Chat is asynchronous too: sends (`sendChat`, `sendClipboard`) are
   fire-and-forget; the optimistic bubble is marked delivered by the
   `ChatDelivered` event (the member acknowledged it), never by the call returning.

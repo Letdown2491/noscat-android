@@ -91,6 +91,7 @@ object ClientHolder {
                     put("npub", m.npub)
                     put("admin", m.admin)
                     put("thisDevice", m.thisDevice)
+                    put("reachable", m.reachable)
                     m.name?.let { put("name", it) } ?: put("name", JSONObject.NULL)
                     m.lastSeenSecs?.let { put("lastSeenSecs", it.toLong()) }
                         ?: put("lastSeenSecs", JSONObject.NULL)
@@ -120,6 +121,7 @@ object ClientHolder {
                 online = false,
                 admin = m.optBoolean("admin", true),
                 thisDevice = m.optBoolean("thisDevice", false),
+                reachable = m.optBoolean("reachable", false),
             )
         }
     }.getOrNull()
@@ -183,6 +185,7 @@ object ClientHolder {
                             p.copy(
                                 npub = m.npub,
                                 admin = m.admin,
+                                reachable = p.reachable || m.reachable,
                                 lastSeenSecs = p.lastSeenSecs?.let { it + elapsedSecs },
                             )
                         } else {
@@ -218,6 +221,142 @@ object ClientHolder {
 
     /** Chat history per peer npub (in memory, oldest first). */
     val chats = HashMap<String, SnapshotStateList<ChatMsg>>()
+
+    /** Messages kept per conversation in chats.json. */
+    private const val CHAT_KEEP = 500
+
+    private fun chatsFile(): File? =
+        appContext?.let { File(it.noBackupFilesDir, "chats.json") }
+
+    private fun loadChats() {
+        val f = chatsFile() ?: return
+        runCatching {
+            val o = JSONObject(f.readText())
+            for (peer in o.keys()) {
+                val a = o.getJSONArray(peer)
+                chatWith(peer).addAll(
+                    (0 until a.length()).map {
+                        val m = a.getJSONObject(it)
+                        ChatMsg(
+                            text = m.getString("text"),
+                            outgoing = m.getBoolean("out"),
+                            failed = m.optBoolean("failed"),
+                            delivered = m.optBoolean("delivered"),
+                            at = m.getLong("at"),
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    private val saveChats = Runnable {
+        val json = JSONObject()
+        for ((peer, msgs) in chats) {
+            if (msgs.isEmpty()) continue
+            val a = JSONArray()
+            msgs.takeLast(CHAT_KEEP).forEach {
+                a.put(
+                    JSONObject().put("text", it.text).put("out", it.outgoing)
+                        .put("failed", it.failed).put("delivered", it.delivered).put("at", it.at),
+                )
+            }
+            json.put(peer, a)
+        }
+        val text = json.toString()
+        val f = chatsFile() ?: return@Runnable
+        Thread { runCatching { f.writeText(text) } }.start()
+    }
+
+    /** Save the chats soon (coalesces a burst of messages into one write). */
+    private fun chatsChanged() {
+        main.removeCallbacks(saveChats)
+        main.postDelayed(saveChats, 500)
+    }
+
+    /** The conversation on screen, if any, and whether the app is in the
+     * foreground: a message there needs no notification. */
+    var visibleChat: String? by mutableStateOf(null)
+    @Volatile var inForeground = false
+
+    /** A device asking to join (it scanned this phone's QR). */
+    data class JoinReq(val npub: String, val name: String?, val approving: Boolean = false)
+
+    /** Join requests waiting for Approve or Decline. Main thread. */
+    val joinRequests = mutableStateListOf<JoinReq>()
+
+    /** Invite a device that asked to join. */
+    fun approveJoin(npub: String) {
+        val c = client ?: return
+        val i = joinRequests.indexOfFirst { it.npub == npub }
+        if (i < 0 || joinRequests[i].approving) return
+        joinRequests[i] = joinRequests[i].copy(approving = true)
+        Thread {
+            val err = runCatching { c.invite(npub) }.exceptionOrNull()
+            main.post {
+                if (err == null) {
+                    joinRequests.removeAll { it.npub == npub }
+                    Notifier.cancelJoin(appContext, npub)
+                    syncRoster()
+                } else {
+                    val j = joinRequests.indexOfFirst { it.npub == npub }
+                    if (j >= 0) joinRequests[j] = joinRequests[j].copy(approving = false)
+                    logLine("invite failed: $err")
+                    appContext?.let { toast(it, "invite failed: ${scrub(err.message ?: err.toString())}") }
+                }
+            }
+        }.start()
+    }
+
+    /** Ignore a join request; the device can ask again. */
+    fun declineJoin(npub: String) {
+        joinRequests.removeAll { it.npub == npub }
+        Notifier.cancelJoin(appContext, npub)
+    }
+
+    /** A member's name for user-facing text, never its npub. */
+    fun nameOf(npub: String): String =
+        roster?.firstOrNull { it.npub == npub }?.name?.takeIf { it.isNotBlank() } ?: "a device"
+
+    /** Replace npubs in a message with member names. */
+    fun scrub(text: String): String =
+        Regex("npub1[0-9a-z]{20,}").replace(text) { nameOf(it.value) }
+
+    private fun toast(context: Context, text: String) {
+        main.post { Toast.makeText(context, text, Toast.LENGTH_LONG).show() }
+    }
+
+    /** What the user hears about an event: a pop-up in the foreground, a
+     * notification otherwise (and always for chat and join requests). */
+    private fun announce(event: Event) {
+        val ctx = appContext ?: return
+        when (event) {
+            is Event.ChatMessage -> {
+                if (!(inForeground && visibleChat == event.peer)) {
+                    Notifier.chat(ctx, event.peer, nameOf(event.peer), event.text)
+                }
+            }
+            is Event.TransferDone -> {
+                val t = transfers.lastOrNull { it.live && it.id == event.id.toLong() }
+                val name = File(event.path).name
+                if (t?.incoming == true) {
+                    if (inForeground) toast(ctx, "received $name from ${nameOf(event.peer)}")
+                    else Notifier.file(ctx, "Received $name", "from ${nameOf(event.peer)}")
+                } else if (inForeground) {
+                    toast(ctx, "sent $name to ${nameOf(event.peer)}")
+                }
+            }
+            is Event.TransferFailed -> {
+                val text = "file transfer failed: ${scrub(event.error)}"
+                if (inForeground) toast(ctx, text) else Notifier.file(ctx, "File transfer failed", scrub(event.error))
+            }
+            is Event.TransferPartial ->
+                if (inForeground) toast(ctx, "${File(event.path).name.removeSuffix(".noscat-part")} is incomplete; it resumes when sent again")
+            is Event.JoinRequest ->
+                if (joinRequests.any { it.npub == event.peer }) Notifier.join(ctx, event.peer, event.name)
+            else -> {}
+        }
+    }
 
     /** Unread chat count per peer npub (Compose observable). */
     val unread = mutableStateMapOf<String, Int>()
@@ -381,6 +520,7 @@ object ClientHolder {
         appContext = context.applicationContext
         roster = loadRoster()
         loadTransfers()
+        loadChats()
     }
 
     /**
@@ -452,19 +592,10 @@ object ClientHolder {
                     override fun onEvent(event: Event) {
                         logLine(render(event))
                         onEventState(event)
-                        // Transfers and chats complete out of band; surface
-                        // the outcome as a toast so it needs no scrolling.
-                        if (
-                            event is Event.TransferDone ||
-                            event is Event.TransferFailed ||
-                            event is Event.TransferPartial ||
-                            event is Event.ChatMessage
-                        ) {
-                            val text = render(event)
-                            main.post {
-                                Toast.makeText(appContext, text, Toast.LENGTH_LONG).show()
-                            }
-                        }
+                        // Transfers, chats and join requests complete out of
+                        // band: a pop-up or a notification, with names.
+                        // Posted so it runs after onEventState's updates.
+                        main.post { announce(event) }
                     }
                 },
             )
@@ -555,6 +686,7 @@ object ClientHolder {
             is Event.ChatMessage -> {
                 chatWith(event.peer).add(ChatMsg(event.text, outgoing = false))
                 unread[event.peer] = (unread[event.peer] ?: 0) + 1
+                chatsChanged()
             }
             is Event.ChatDelivered -> {
                 // The member acknowledged it: mark the newest
@@ -564,6 +696,7 @@ object ClientHolder {
                 if (msgs != null) {
                     val idx = msgs.indexOfLast { it.outgoing && !it.delivered && !it.failed }
                     if (idx >= 0) msgs[idx] = msgs[idx].copy(delivered = true)
+                    chatsChanged()
                 }
                 if (pendingClipboard.remove(event.peer) != null) {
                     Toast.makeText(
@@ -604,6 +737,7 @@ object ClientHolder {
                 val msgs = chats[event.peer] ?: return
                 val idx = msgs.indexOfLast { it.outgoing && !it.failed }
                 if (idx >= 0) msgs[idx] = msgs[idx].copy(failed = true)
+                chatsChanged()
             }
             is Event.Listening -> {
                 // Serve side is up; render() logs it, nothing to track.
@@ -620,9 +754,19 @@ object ClientHolder {
             is Event.MeshJoined, is Event.Roster, is Event.MemberSeen,
             is Event.MeshLeft -> syncRoster()
             is Event.MeshChangeUndone -> {}
-            // Inviting from the phone needs an approve prompt (not built
-            // yet); render() logs the request.
-            is Event.JoinRequest -> {}
+            // A device that scanned this phone's QR asks to join: the app
+            // shows Approve / Decline, and a notification (announce).
+            is Event.JoinRequest -> main.post {
+                // Already a member, or asked before: keep the newest name.
+                if (roster?.any { it.npub == event.peer } != true) {
+                    val i = joinRequests.indexOfFirst { it.npub == event.peer }
+                    if (i >= 0) {
+                        joinRequests[i] = joinRequests[i].copy(name = event.name)
+                    } else {
+                        joinRequests.add(JoinReq(event.peer, event.name))
+                    }
+                }
+            }
         }
     }
 
@@ -776,6 +920,7 @@ object ClientHolder {
     fun sendChat(peer: String, text: String) {
         val c = client ?: run { logLine("chat aborted: client is not running"); return }
         chatWith(peer).add(ChatMsg(text, outgoing = true))
+        chatsChanged()
         Thread {
             try {
                 c.sendChat(peer, text)
@@ -785,6 +930,7 @@ object ClientHolder {
                     val msgs = chatWith(peer)
                     val idx = msgs.indexOfLast { it.outgoing && !it.failed }
                     if (idx >= 0) msgs[idx] = msgs[idx].copy(failed = true)
+                    chatsChanged()
                 }
             }
         }.start()
@@ -859,6 +1005,8 @@ object ClientHolder {
         main.post {
             chats.clear()
             unread.clear()
+            chatsChanged()
+            joinRequests.clear()
             // The history names devices of the mesh just left.
             transfers.clear()
             persistTransfers()

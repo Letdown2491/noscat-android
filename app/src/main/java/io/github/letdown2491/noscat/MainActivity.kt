@@ -20,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -128,9 +129,50 @@ class MainActivity : ComponentActivity() {
         ClientHolder.init(this)
         ThemeState.load(this)
         NoscatService.start(this)
+        NavRequest.from(intent)
+        // Android 13+: notifications (messages, files, join requests) need
+        // the user's yes; asked once, the app works either way.
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
         setContent { NoscatApp() }
     }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        NavRequest.from(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        ClientHolder.inForeground = true
+    }
+
+    override fun onStop() {
+        ClientHolder.inForeground = false
+        super.onStop()
+    }
 }
+
+/** Where a tapped notification asks the app to go. */
+object NavRequest {
+    var chat by mutableStateOf<String?>(null)
+    var tab by mutableStateOf<String?>(null)
+
+    fun from(intent: android.content.Intent?) {
+        intent ?: return
+        intent.getStringExtra(Notifier.EXTRA_CHAT)?.let { chat = it }
+        intent.getStringExtra(Notifier.EXTRA_TAB)?.let { tab = it }
+    }
+}
+
+/** The short form of an npub that join screens and approve prompts show
+ * to compare: "npub1abcdefg...uvwxyz". */
+fun shortId(npub: String): String =
+    if (npub.length > 20) "${npub.take(12)}...${npub.takeLast(6)}" else npub
 
 /** The active theme, observable by Compose and persisted in prefs. Dark
  * is the default; Settings offers light and follow-the-system too. */
@@ -199,6 +241,18 @@ private fun Root(modifier: Modifier = Modifier) {
             if (tab == "files") seenInbox = ClientHolder.inboxVersion
         }
         val newFiles = ClientHolder.inboxVersion - seenInbox
+        // A tapped notification: open its conversation or tab.
+        LaunchedEffect(NavRequest.chat, NavRequest.tab) {
+            NavRequest.chat?.let {
+                chatPeer = it
+                tab = "chat"
+                NavRequest.chat = null
+            }
+            NavRequest.tab?.let {
+                tab = it
+                NavRequest.tab = null
+            }
+        }
         // Go offline but stay a member; the chip or Settings reconnects.
         // Shared by every screen's chip.
         val disconnect: () -> Unit = {
@@ -481,7 +535,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                 color = MaterialTheme.colorScheme.error,
             )
             Text(
-                "Make sure that device is running 'noscat up' and approves this phone (the invite line it prints, or 'noscat up --accept-joins').",
+                "Make sure that device is running and approves this phone: on its Devices page in the apps, or the invite line 'noscat up' prints.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -504,7 +558,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "That device shows a join request; approve it there with the invite line it prints.",
+                "That device shows a join request: approve it on its Devices page (or with the invite line 'noscat up' prints).",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -601,7 +655,59 @@ private fun DevicesScreen(
             ConnectionChip(connected = ClientHolder.client != null, onDisconnect = onDisconnect)
         }
 
+        // Join requests: a device that scanned this phone's QR asks to be
+        // invited. Its name is its own claim, so the short ID is shown to
+        // compare with the joining device's screen.
+        ClientHolder.joinRequests.forEach { r ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "${r.name?.takeIf { it.isNotBlank() } ?: "A device"} wants to join the mesh",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        "device ID ${shortId(r.npub)}. approve only a device you are " +
+                            "setting up: check this ID on its screen",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { ClientHolder.declineJoin(r.npub) }) { Text("Decline") }
+                        Button(
+                            onClick = { ClientHolder.approveJoin(r.npub) },
+                            enabled = !r.approving && ClientHolder.client != null,
+                        ) { Text(if (r.approving) "Inviting..." else "Approve") }
+                    }
+                }
+            }
+        }
+
         val list = members
+        // Every mesh needs a member reachable from the internet; a phone
+        // never is. Once a member has been heard from and none says so,
+        // explain why devices on other networks cannot connect.
+        if (list != null && list.any { it.lastSeenSecs != null } && list.none { it.reachable }) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "no device in this mesh is reachable from the internet, so devices " +
+                        "on different networks cannot connect (same Wi-Fi still works). " +
+                        "run one, like a home server or VPS, with 'noscat up --reachable'",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        }
         when {
             list == null -> Text(
                 "loading devices...",
@@ -609,8 +715,8 @@ private fun DevicesScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             list.isEmpty() -> Text(
-                "no other devices in this mesh yet. add one from a computer " +
-                    "in the mesh with 'noscat up' and the invite line it prints",
+                "no other devices in this mesh yet. on the new device, join " +
+                    "with this phone's QR (Settings), then approve its request here",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1518,6 +1624,13 @@ private fun ConversationScreen(peer: String, peerLabel: String, onBack: () -> Un
     // This conversation is on screen: nothing from this peer counts as
     // unread (re-armed when the message count changes).
     LaunchedEffect(peer, msgs.size) { ClientHolder.markRead(peer) }
+    // On screen: no notifications for this conversation, and any shown go.
+    val context = LocalContext.current
+    DisposableEffect(peer) {
+        ClientHolder.visibleChat = peer
+        Notifier.cancelChat(context, peer)
+        onDispose { if (ClientHolder.visibleChat == peer) ClientHolder.visibleChat = null }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
