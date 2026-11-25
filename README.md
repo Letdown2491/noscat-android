@@ -8,8 +8,8 @@ the protocol lives in the noscat workspace (`noscat-core`/`noscat-client`/
 
 Status: phase 1 in progress: chat, file send/receive, port forwards to a member's
 services, and joining a mesh by scanning a member's QR. It is on noscat 0.5.0,
-which is not released yet: the native bridge is built from a local noscat checkout,
-and the app cannot talk to 0.4 devices. Roadmap and agent guidance in
+which is not released yet: the native bridge is built from a local noscat checkout.
+Roadmap and agent guidance in
 [AGENTS.md](AGENTS.md).
 
 ## Joining a mesh

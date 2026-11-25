@@ -84,9 +84,7 @@ layer stays native Kotlin instead of a cross-platform framework.
   connection change; never saved), amber when only the advert is fresh
   (under ten minutes, aged forward from `rosterAgeBase` on a 30 s tick),
   red otherwise.
-  noscat 0.5 starts fresh: the device lives in `filesDir/device` (pref
-  `device_dir`), and 0.4's `mesh` dir, `mesh_dir` pref and `roster.json`
-  are never read. Creating a mesh from the phone needs UI that does not
+  The device lives in `filesDir/device` (pref `device_dir`). Creating a mesh from the phone needs UI that does not
   exist yet; a CLI device creates it. Inviting is approving a join request
   (see Runtime behavior). The join screen's `meshJoin` runs
   a temporary device for `filesDir/device`; it is released when the call
