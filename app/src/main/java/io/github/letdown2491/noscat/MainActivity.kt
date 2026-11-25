@@ -396,6 +396,9 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
     val dir = remember { File(context.filesDir, "device") }
 
     var ownerNpub by remember { mutableStateOf<String?>(null) }
+    // The whole scanned or pasted code: a private mesh's QR also names its
+    // relays, and the join goes through them.
+    var ownerTarget by remember { mutableStateOf<String?>(null) }
     var ownerField by remember { mutableStateOf("") }
     var failed by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
@@ -403,8 +406,9 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
     var deviceNpub by remember { mutableStateOf<String?>(null) }
 
     val qrScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { extractNpub(it) }?.let {
-            ownerNpub = it
+        result.contents?.let { raw -> extractNpub(raw)?.let { raw.trim() to it } }?.let { (raw, np) ->
+            ownerNpub = np
+            ownerTarget = raw
             failed = false
         } ?: toast(context, "that QR does not contain a noscat npub")
     }
@@ -468,6 +472,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
                         toast(context, "that does not look like a npub")
                     } else {
                         ownerNpub = np
+                        ownerTarget = ownerField
                         failed = false
                     }
                 },
@@ -497,7 +502,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
             }
         }
         val res = withContext(Dispatchers.IO) {
-            runCatching { meshJoin(dir.absolutePath, 180uL, owner, null) }
+            runCatching { meshJoin(dir.absolutePath, 180uL, ownerTarget ?: owner, null) }
         }
         republish.cancel()
         res.fold(
@@ -548,6 +553,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
             OutlinedButton(
                 onClick = {
                     ownerNpub = null
+                    ownerTarget = null
                     deviceNpub = null
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -592,6 +598,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
             Spacer(Modifier.height(16.dp))
             OutlinedButton(onClick = {
                 ownerNpub = null
+                ownerTarget = null
                 deviceNpub = null
             }) { Text("Cancel") }
         }

@@ -24,6 +24,11 @@ CLI does that.
 3. On the CLI, type the `invite npub1...` line it prints (not needed with
    `--accept-joins`). The phone joins and shows the device list.
 
+In a private mesh (`noscat mesh private`, on a members-only relay such as
+noscat-relay) the member's QR also names the mesh's relay, and the phone
+joins through it alone. Pasting works too with the whole code from
+`noscat mesh qr`.
+
 Every mesh needs one member reachable from the internet; on one Wi-Fi network,
 devices find each other directly.
 

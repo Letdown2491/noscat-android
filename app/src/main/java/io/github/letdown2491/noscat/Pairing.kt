@@ -7,7 +7,8 @@ import com.google.zxing.qrcode.QRCodeWriter
 
 /**
  * Pairing payload exchange, per docs/nip-noscat.md "Pairing QR codes" in the
- * noscat repo: the QR encodes `noscat:<npub>` and nothing else. Relays,
+ * noscat repo: the QR encodes `noscat:<npub>`, plus `?relay=` hints for a
+ * private mesh (kept whole and handed to meshJoin). Other relays,
  * mesh, and endpoints come from the scanner's own config plus the peer's
  * published advert, never from the QR.
  */
