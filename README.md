@@ -106,3 +106,7 @@ key means users uninstall and join again.
 A release APK cannot be installed over a debug build (different signing keys):
 switching means uninstalling, which deletes the phone's device identity, so it
 joins the mesh again as a new device.
+
+## License
+
+MIT
