@@ -25,8 +25,8 @@ layer stays native Kotlin instead of a cross-platform framework.
 1. **Zero protocol code in this repo.** If a change needs FIPS, QUIC streams, Marmot, Nostr
    events, relay logic, advert handling, or FFI surface changes, it belongs in the
    noscat repo's `crates/noscat-ffi`, published to crates.io, then bumped here.
-   Until noscat 0.5.0 is published, build it from the local checkout
-   (`scripts/build-native.sh local`).
+   To try unreleased noscat changes, build from the local checkout
+   (`scripts/build-native.sh local`); releases use the published crate.
    The upstream API contract is `API.md` in the
    [noscat repo](https://github.com/Letdown2491/noscat/blob/main/API.md): consult
    it before touching event handling, mesh glue, or the FFI surface. Its
@@ -100,8 +100,8 @@ layer stays native Kotlin instead of a cross-platform framework.
 
 ## Commands (verified)
 
-Native bridge: cross-compile `noscat-ffi` for arm64 (from the local noscat checkout,
-or a published version), strip, and regenerate the Kotlin bindings (a few minutes
+Native bridge: cross-compile `noscat-ffi` for arm64 (a published version, or the
+local noscat checkout for unreleased changes), strip, and regenerate the Kotlin bindings (a few minutes
 on a warm cache). The Rust build is the debug profile unless `PROFILE=release`
 (LTO; built with symbols because uniffi reads the bindings from them, stripped
 afterwards). `scripts/build-release.sh` does that plus a signed `assembleRelease`

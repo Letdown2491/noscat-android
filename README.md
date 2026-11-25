@@ -7,9 +7,8 @@ the protocol lives in the noscat workspace (`noscat-core`/`noscat-client`/
 `noscat-ffi`), so this repo contains no protocol code.
 
 Status: phase 1 in progress: chat, file send/receive, port forwards to a member's
-services, and joining a mesh by scanning a member's QR. It is on noscat 0.5.0,
-which is not released yet: the native bridge is built from a local noscat checkout.
-Roadmap and agent guidance in
+services, and joining a mesh by scanning a member's QR. It is on noscat 0.5.0
+(the `noscat-ffi` crate from crates.io). Roadmap and agent guidance in
 [AGENTS.md](AGENTS.md).
 
 ## Joining a mesh
@@ -76,8 +75,8 @@ Two steps: the native bridge, then the app.
    `app/src/main/jniLibs/`, and regenerates the Kotlin bindings):
 
    ```
-   ./scripts/build-native.sh local      # build from the ~/Documents/noscat checkout
-   ./scripts/build-native.sh <version>  # or a published noscat-ffi (0.5.0 once released)
+   ./scripts/build-native.sh            # the published noscat-ffi (default 0.5.0)
+   ./scripts/build-native.sh local      # or unreleased changes in ~/Documents/noscat
    ```
 
    Either way the Rust library is a debug build (stripped, not optimized), so
