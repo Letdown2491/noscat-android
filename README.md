@@ -33,7 +33,8 @@ before approving.
 
 In a private mesh (`noscat mesh private`, on a members-only relay such as
 noscat-relay) the member's QR also names the mesh's relay, and the phone
-joins through it alone. Pasting works too with the whole code from
+joins through it alone: nothing of it, not even its key package, reaches the
+public relays. Pasting works too with the whole code from
 `noscat mesh qr`.
 
 Every mesh needs one member reachable from the internet; on one Wi-Fi network,
