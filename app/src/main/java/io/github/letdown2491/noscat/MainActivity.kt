@@ -714,6 +714,16 @@ private fun DevicesScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             else -> {
+                // This device first (as on the desktop and in `mesh members`): your npub is copyable from the same
+                // list your peers' npubs live in.
+                val selfNpub = ClientHolder.myNpub
+                if (selfNpub != null) {
+                    SelfCard(
+                        name = AppPrefs.deviceName(context)?.takeIf { it.isNotBlank() }
+                            ?: android.os.Build.MODEL,
+                        npub = selfNpub,
+                    )
+                }
                 list.forEach { m ->
                     DeviceCard(
                         member = m,
@@ -723,16 +733,6 @@ private fun DevicesScreen(
                         },
                         onChat = { onOpenChat(m.npub) },
                         onForward = { forwardTarget = m.npub },
-                    )
-                }
-                // This device, too: your npub is copyable from the same
-                // list your peers' npubs live in.
-                val selfNpub = ClientHolder.myNpub
-                if (selfNpub != null) {
-                    SelfCard(
-                        name = AppPrefs.deviceName(context)?.takeIf { it.isNotBlank() }
-                            ?: android.os.Build.MODEL,
-                        npub = selfNpub,
                     )
                 }
             }
