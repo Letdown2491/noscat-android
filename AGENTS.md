@@ -51,20 +51,31 @@ layer stays native Kotlin instead of a cross-platform framework.
 
 ## Layout
 
-- `app/`: the Android app. `MainActivity.kt` holds the screens: the join flow
-  (mesh invite by QR), and a five-tab layout with Devices in the center and
-  slightly larger: Chat (conversation list and bubbles), Files (Received:
-  the inbox with each file's sender; Sent: the last 100 sends with Send
-  again; progress bars both ways), Devices (roster with per-row actions in the
-  desktop app's order: chat, send-file, forward, clipboard), Services (the
-  port forwards this phone is running, each stoppable; expose joins this
-  tab in phase 2), Settings (status, device name, this phone's QR, and
-  diagnostics: the event log, collapsed until tapped, with Copy log). Disconnect
-  lives on the connection chip itself (click it, on any tab's header) plus
-  a button in Settings, both behind a confirm dialog. Disconnect keeps the
+- `app/`: the Android app. `MainActivity.kt` holds the screens; `Ui.kt` holds
+  the shared look (the same language as noscat-desktop): `Palette` (status
+  colors, brand blue, avatar hues from the npub by FNV-1a, identical to the
+  desktop's so a device has one color everywhere), `noscatColors` (neutral
+  surfaces, no tint), presence (`Presence`, `presenceText`), `Avatar`,
+  `SectionLabel`, `EmptyState`, the logo with its connection ring
+  (`LogoHalo`/`MeshButton`: green connected, amber connecting, red offline),
+  the mesh sheet and the Invite dialog. Screens: the join flow (scan or
+  paste a pairing code, then wait for approval showing the short ID to
+  compare), then four tabs in the desktop sidebar's order: Devices (THIS
+  PHONE with rename, OTHER DEVICES; tap a row to chat, icons for send a
+  file, forward and share clipboard (previewed first), long-press for all),
+  Chat (list with last message, time, unread; a conversation hides the tab
+  bar and has its own top bar), Files (Received/Sent segmented; Clear sent
+  history is in the top bar's overflow menu, Sent side only), Services
+  (port forwards, New forward picks the device). Selected tabs use filled
+  icons, others outlined, all one size. Settings is not a tab: the logo
+  button at the top right opens the mesh sheet (mesh name, "Connected N of
+  M" counting other devices, Invite a device, Settings, Disconnect or
+  Reconnect), and Settings opens as a page with a back arrow, in cards:
+  This phone, Appearance, Diagnostics, Danger zone. Disconnect acts at once
+  (Reconnect undoes it); only Forget asks. Disconnect keeps the
   phone a member: `ClientHolder.disconnect` closes the client and sets the
-  `disconnected` pref, so it stays offline across restarts until Reconnect
-  (chip or Settings). Forget mesh (Settings) is `ClientHolder.forget`:
+  `disconnected` pref, so it stays offline across restarts until
+  Reconnect. Forget mesh (Settings) is `ClientHolder.forget`:
   `meshLeave` (30 s; with no member online it forgets locally and the next
   member online completes the removal), then it deletes `filesDir/device`
   and `members.json` and drops to the join flow. If leaving fails, nothing

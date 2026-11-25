@@ -148,6 +148,19 @@ object AppPrefs {
             .edit().putString(KEY_DEVICE_NAME, name).commit()
     }
 
+    private const val KEY_MESH_NAME = "mesh_name"
+
+    /** The mesh's name, cached from the running client so the header shows
+     * it offline too; null before the first read (or after Forget). */
+    fun meshName(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_MESH_NAME, null)
+
+    fun setMeshName(context: Context, name: String?) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_MESH_NAME, name).apply()
+    }
+
     private const val KEY_THEME = "theme"
     const val THEME_DARK = "dark"
     const val THEME_LIGHT = "light"

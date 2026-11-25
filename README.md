@@ -16,9 +16,9 @@ services, and joining a mesh by scanning a member's QR. It is on noscat 0.5.0
 The app cannot create a mesh yet; a device running the noscat CLI does that
 (`noscat mesh create <name>`).
 
-1. On a device in the mesh, show its QR: Settings in the apps, or
-   `noscat mesh qr` on a computer (`noscat up` prints it too).
-2. In the app, tap **Scan a mesh device's QR** (or paste the code). The phone
+1. On a device in the mesh, show its pairing code: **Invite a device** in the
+   apps, or `noscat mesh qr` on a computer (`noscat up` prints it too).
+2. In the app, tap **Scan pairing code** (or paste the code). The phone
    sends that device a join request and waits up to three minutes.
 3. Approve the request on that device: Approve on the apps' Devices tab; on a
    CLI running `noscat up` in a terminal, type the `invite npub1...` line it
@@ -26,7 +26,7 @@ The app cannot create a mesh yet; a device running the noscat CLI does that
    answer y. The phone joins and shows the device list.
 
 Once in the mesh, the phone approves join requests too: a device that scans
-this phone's QR (Settings) shows up on the Devices tab with Approve and
+this phone's code (tap the logo at the top right, then **Invite a device**) shows up on the Devices tab with Approve and
 Decline. Check the short device ID against the joining device's screen
 before approving.
 
@@ -34,12 +34,14 @@ In a private mesh (`noscat mesh private`, on a members-only relay such as
 noscat-relay) the member's QR also names the mesh's relay, and the phone
 joins through it alone: nothing of it, not even its key package, reaches the
 public relays. Pasting works too with the whole code from
-`noscat mesh qr`.
+`noscat mesh qr`. The phone's own Invite code does not carry the relays yet
+([noscat#20](https://github.com/Letdown2491/noscat/issues/20)); invite into a
+private mesh from a computer for now.
 
 Every mesh needs one member reachable from the internet; on one Wi-Fi network,
 devices find each other directly.
 
-**Disconnect** (connection chip or Settings) takes the phone offline but keeps
+**Disconnect** (the logo's sheet or Settings) takes the phone offline but keeps
 it in the mesh, even across restarts; **Reconnect** brings it back as the same
 device. **Forget mesh** (Settings) asks the other members to remove the phone,
 then deletes its identity and mesh data (received files stay); to come back,
@@ -49,15 +51,18 @@ one next comes online.
 ## Devices and chat
 
 Devices are listed this phone first, then by name; being online never moves a
-device. The Chat tab lists every member, latest conversation first. A message
-the other device never acknowledged is marked "not delivered": tap it to send
-the text again as a new message, or long-press any message for Delete (and
-Retry). Nothing is resent automatically, since the other device may have
+device. Tap a device to chat with it; its icons send a file, forward a port
+and share the clipboard (shown to you before it is sent). The Chat tab lists
+every member, latest conversation first. A message the other device never
+acknowledged is marked "not delivered": tap it to send the text again as a
+new message, or long-press any message for Copy and Delete (and Try again). Nothing is resent automatically, since the other device may have
 received it. When the phone switches networks (Wi-Fi to cellular and back),
 the app tells noscat at once, so connections recover in seconds.
 
-Settings > Diagnostics shows the event log when tapped; **Copy log** copies it
-for a bug report.
+The logo at the top right shows the connection as a ring (green connected,
+amber connecting, red offline); tap it for the mesh, Invite a device,
+Settings and Disconnect. Settings > Diagnostics shows the event log; **Copy**
+copies it for a bug report.
 
 ## Presence
 

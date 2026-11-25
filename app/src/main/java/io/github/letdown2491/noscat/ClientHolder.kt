@@ -51,6 +51,29 @@ object ClientHolder {
     var myNpub: String? by mutableStateOf(null)
         private set
 
+    /** The mesh's name, read off the main thread at start and on each
+     * roster sync, and kept in prefs so it shows offline (Compose
+     * observable). */
+    var meshName: String? by mutableStateOf(null)
+        private set
+
+    /** When the node last came up: online members without a connection
+     * read "connecting" rather than amber for [CONNECT_GRACE_MS], since
+     * the first dial round is still running. */
+    var upSince: Long by mutableStateOf(0L)
+        private set
+
+    /** One full dial round: the client re-dials online members every 30 s. */
+    const val CONNECT_GRACE_MS = 45_000L
+
+    private fun readMeshName(c: NoscatClient) {
+        val name = runCatching { c.meshName() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return
+        if (name != meshName) {
+            meshName = name
+            appContext?.let { AppPrefs.setMeshName(it, name) }
+        }
+    }
+
     /** Transfers, oldest first: this run's live ones plus the saved
      * history (the Sent list, and who sent each received file). Main
      * thread only. */
@@ -198,6 +221,7 @@ object ClientHolder {
                     }
                     roster = merged.filter { it.npub != myNpub }.displayOrder()
                     cacheRoster(roster!!)
+                    client?.let(::readMeshName)
                 },
                 { if (gen == syncGen.get()) logLine("sync failed: ${it.message}") },
             )
@@ -306,7 +330,7 @@ object ClientHolder {
                     val j = joinRequests.indexOfFirst { it.npub == npub }
                     if (j >= 0) joinRequests[j] = joinRequests[j].copy(approving = false)
                     logLine("invite failed: $err")
-                    appContext?.let { toast(it, "invite failed: ${scrub(err.message ?: err.toString())}") }
+                    appContext?.let { toast(it, "Invite failed: ${scrub(err.message ?: err.toString())}") }
                 }
             }
         }.start()
@@ -344,18 +368,18 @@ object ClientHolder {
                 val t = transfers.lastOrNull { it.live && it.id == event.id.toLong() }
                 val name = File(event.path).name
                 if (t?.incoming == true) {
-                    if (inForeground) toast(ctx, "received $name from ${nameOf(event.peer)}")
+                    if (inForeground) toast(ctx, "Received $name from ${nameOf(event.peer)}")
                     else Notifier.file(ctx, "Received $name", "from ${nameOf(event.peer)}")
-                } else if (inForeground) {
-                    toast(ctx, "sent $name to ${nameOf(event.peer)}")
                 }
+                // A finished send shows on the device's row and in its
+                // conversation; no toast.
             }
             is Event.TransferFailed -> {
-                val text = "file transfer failed: ${scrub(event.error)}"
+                val text = "File transfer failed: ${scrub(event.error)}"
                 if (inForeground) toast(ctx, text) else Notifier.file(ctx, "File transfer failed", scrub(event.error))
             }
             is Event.TransferPartial ->
-                if (inForeground) toast(ctx, "${File(event.path).name.removeSuffix(".noscat-part")} is incomplete; it resumes when sent again")
+                if (inForeground) toast(ctx, "${File(event.path).name.removeSuffix(".noscat-part")} is incomplete; sending it again resumes it")
             is Event.JoinRequest ->
                 if (joinRequests.any { it.npub == event.peer }) Notifier.join(ctx, event.peer, event.name)
             else -> {}
@@ -531,6 +555,7 @@ object ClientHolder {
                 logLine("storage key unreadable, the device files stay sealed: ${k.error}")
         }
         roster = loadRoster()?.displayOrder()
+        meshName = AppPrefs.meshName(context)
         loadTransfers()
         loadChats()
         watchNetwork(context.applicationContext)
@@ -659,6 +684,7 @@ object ClientHolder {
             )
             client = c
             myNpub = runCatching { c.npub() }.getOrNull()
+            if (meshDir != null) readMeshName(c)
             this.meshDir = meshDir
             logLine(
                 if (meshDir != null) "client started (mesh joined)" else "client started",
@@ -670,6 +696,7 @@ object ClientHolder {
                     try {
                         val out = outDir()
                         c.up(out, null)
+                        upSince = System.currentTimeMillis()
                         nodeUp = true
                         startRosterSyncLoop()
                         logLine("node up: files arrive in the inbox automatically")
@@ -1001,7 +1028,7 @@ object ClientHolder {
      * acknowledgement was lost. */
     fun retryChat(peer: String, msg: ChatMsg) {
         if (client == null) {
-            toastShort("not connected")
+            toastShort("Not connected")
             return
         }
         chatWith(peer).remove(msg)
@@ -1096,6 +1123,8 @@ object ClientHolder {
             transfers.clear()
             persistTransfers()
         }
+        meshName = null
+        appContext?.let { AppPrefs.setMeshName(it, null) }
         logLine("left the mesh; device data deleted")
         return null
     }
