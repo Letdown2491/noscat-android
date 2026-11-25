@@ -187,8 +187,6 @@ Kotlin bindings regenerate with it.
   state. A new phone joins as a new device.
 - Chats persist in `noBackupFilesDir/chats.json` (500 per conversation,
   saved debounced); Forget clears them.
-- Devices warns when no member is reachable from the internet
-  (`MeshMember.reachable`), once a member has been heard from.
 - Chat is asynchronous too: sends (`sendChat`, `sendClipboard`) are
   fire-and-forget; the optimistic bubble is marked delivered by the
   `ChatDelivered` event (the member acknowledged it), never by the call returning.

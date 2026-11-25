@@ -688,26 +688,6 @@ private fun DevicesScreen(
         }
 
         val list = members
-        // Every mesh needs a member reachable from the internet; a phone
-        // never is. Once a member has been heard from and none says so,
-        // explain why devices on other networks cannot connect.
-        if (list != null && list.any { it.lastSeenSecs != null } && list.none { it.reachable }) {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    "no device in this mesh is reachable from the internet, so devices " +
-                        "on different networks cannot connect (same Wi-Fi still works). " +
-                        "run one, like a home server or VPS, with 'noscat up --reachable'",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(16.dp),
-                )
-            }
-        }
         when {
             list == null -> Text(
                 "loading devices...",
