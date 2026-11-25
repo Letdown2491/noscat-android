@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -12,8 +14,39 @@ android {
         applicationId = "io.github.letdown2491.noscat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // Lockstep with noscat: versionName is the noscat release, and
+        // versionCode goes up with every release.
+        versionCode = 5
+        versionName = "0.5.0"
+    }
+
+    // Release signing: keystore.properties at the repo root (never
+    // committed) names the keystore and its passwords:
+    //   storeFile=/home/you/.android/noscat-release.jks
+    //   storePassword=...
+    //   keyAlias=noscat
+    //   keyPassword=...
+    // Without it, assembleRelease builds an unsigned APK.
+    val keystoreFile = rootProject.file("keystore.properties")
+    val releaseSigning = if (keystoreFile.exists()) {
+        val props = Properties().apply { keystoreFile.inputStream().use { load(it) } }
+        signingConfigs.create("release") {
+            storeFile = file(props.getProperty("storeFile"))
+            storePassword = props.getProperty("storePassword")
+            keyAlias = props.getProperty("keyAlias")
+            keyPassword = props.getProperty("keyPassword")
+        }
+    } else {
+        null
+    }
+
+    buildTypes {
+        release {
+            // No R8: JNA (the uniffi bindings) finds its classes by
+            // reflection, and the app is small enough without shrinking.
+            isMinifyEnabled = false
+            signingConfig = releaseSigning
+        }
     }
 
     buildFeatures {

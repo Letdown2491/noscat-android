@@ -10,7 +10,19 @@
 #   scripts/build-native.sh [version]   # build the published crate; default 0.5.0
 #   scripts/build-native.sh local       # build from a noscat checkout
 #                                       # (NOSCAT_DIR overrides, default ~/Documents/noscat)
+#   PROFILE=release scripts/build-native.sh ...   # optimized (LTO), for release APKs
+#
+# The default is a debug build (fast to compile, slow transfers). A release
+# build keeps its symbols until the Kotlin bindings are generated (uniffi
+# reads them from the library), then strips the copy the app ships.
 set -eu
+
+PROFILE="${PROFILE:-debug}"
+case "$PROFILE" in
+  debug) CARGO_PROFILE="" ;;
+  release) CARGO_PROFILE="--release --config profile.release.lto=true --config profile.release.strip=false --config profile.release.codegen-units=1" ;;
+  *) echo "PROFILE must be debug or release" >&2; exit 1 ;;
+esac
 
 NDK="$HOME/Android/Sdk/ndk/27.2.12479018"
 [ -d "$NDK" ] || { echo "NDK not found at $NDK" >&2; exit 1; }
@@ -35,16 +47,16 @@ if [ "${1:-}" = "local" ]; then
     -w /noscat localhost/noscat-dev \
     sh -c "set -eu
       rustup target add aarch64-linux-android
-      cargo build -p noscat-ffi --target aarch64-linux-android
+      cargo build -p noscat-ffi --target aarch64-linux-android $CARGO_PROFILE
       cargo run -q -p noscat-ffi --bin uniffi-bindgen -- generate \
-        --library ./target/aarch64-linux-android/debug/libnoscat_ffi.so \
+        --library ./target/aarch64-linux-android/$PROFILE/libnoscat_ffi.so \
         --language kotlin --out-dir /tmp/bindings
       mkdir -p /out/jniLibs/arm64-v8a /out/java/uniffi/noscat
       /ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
         -o /out/jniLibs/arm64-v8a/libnoscat_ffi.so \
-        ./target/aarch64-linux-android/debug/libnoscat_ffi.so
+        ./target/aarch64-linux-android/$PROFILE/libnoscat_ffi.so
       cp /tmp/bindings/uniffi/noscat/noscat_ffi.kt /out/java/uniffi/noscat/noscat_android.kt"
-  echo "installed jniLibs and regenerated bindings (local checkout: $NOSCAT_DIR)"
+  echo "installed jniLibs ($PROFILE) and regenerated bindings (local checkout: $NOSCAT_DIR)"
   exit 0
 fi
 
@@ -62,14 +74,14 @@ podman run --rm \
     cp -r \$(ls -d /usr/local/cargo/registry/src/*/noscat-ffi-${NFFI_VERSION}) /tmp/ffi
     cd /tmp/ffi
     rustup target add aarch64-linux-android
-    cargo build --target aarch64-linux-android
+    cargo build --target aarch64-linux-android $CARGO_PROFILE
     cargo run -q --bin uniffi-bindgen -- generate \
-      --library ./target/aarch64-linux-android/debug/libnoscat_ffi.so \
+      --library ./target/aarch64-linux-android/$PROFILE/libnoscat_ffi.so \
       --language kotlin --out-dir /tmp/bindings
     mkdir -p /out/jniLibs/arm64-v8a /out/java/uniffi/noscat
     /ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
       -o /out/jniLibs/arm64-v8a/libnoscat_ffi.so \
-      ./target/aarch64-linux-android/debug/libnoscat_ffi.so
+      ./target/aarch64-linux-android/$PROFILE/libnoscat_ffi.so
     cp /tmp/bindings/uniffi/noscat/noscat_ffi.kt /out/java/uniffi/noscat/noscat_android.kt"
 
-echo "installed jniLibs and regenerated bindings (noscat-ffi ${NFFI_VERSION})"
+echo "installed jniLibs ($PROFILE) and regenerated bindings (noscat-ffi ${NFFI_VERSION})"

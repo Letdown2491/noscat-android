@@ -81,7 +81,7 @@ Two steps: the native bridge, then the app.
    ```
 
    Either way the Rust library is a debug build (stripped, not optimized), so
-   transfers are slower than a release build would be.
+   transfers are slower than a release build (`PROFILE=release`, below).
 
 2. The app itself (needs the JDK 21 tarball in `~/opt`):
 
@@ -92,3 +92,17 @@ Two steps: the native bridge, then the app.
 The APK lands in `app/build/outputs/apk/debug/`. Install it over USB or wireless
 debugging with `~/Android/Sdk/platform-tools/adb install -r
 app/build/outputs/apk/debug/app-debug.apk`.
+
+### Release build
+
+`scripts/build-release.sh [version|local]` builds the optimized native bridge
+(`PROFILE=release`: LTO, stripped after the bindings are generated) and a signed
+`app/build/outputs/apk/release/app-release.apk`. Signing reads
+`keystore.properties` at the repo root (never committed; see
+`app/build.gradle.kts` for its keys), which points at a keystore kept outside
+the repo. Back up both: an update must be signed with the same key, and a lost
+key means users uninstall and join again.
+
+A release APK cannot be installed over a debug build (different signing keys):
+switching means uninstalling, which deletes the phone's device identity, so it
+joins the mesh again as a new device.

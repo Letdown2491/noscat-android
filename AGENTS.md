@@ -104,8 +104,12 @@ layer stays native Kotlin instead of a cross-platform framework.
 
 Native bridge: cross-compile `noscat-ffi` for arm64 (from the local noscat checkout,
 or a published version), strip, and regenerate the Kotlin bindings (a few minutes
-on a warm cache). The Rust build is the debug profile; switching it to release is a
-0.5.0 release item.
+on a warm cache). The Rust build is the debug profile unless `PROFILE=release`
+(LTO; built with symbols because uniffi reads the bindings from them, stripped
+afterwards). `scripts/build-release.sh` does that plus a signed `assembleRelease`
+(signing from the git-ignored `keystore.properties`; the keystore lives outside the
+repo, never commit either). Version: `versionName` follows noscat (0.5.0),
+`versionCode` goes up every release.
 
 ```
 ./scripts/build-native.sh local    # or a version number for a published crate
