@@ -11,6 +11,12 @@ services, and joining a mesh by scanning a member's QR. It is on noscat 0.5.0
 (the `noscat-ffi` crate from crates.io). Roadmap and agent guidance in
 [AGENTS.md](AGENTS.md).
 
+<p align="center">
+  <img src="docs/devices.png" width="260" alt="Devices: this phone and the other devices, each with send a file, forward and share clipboard">
+  <img src="docs/chat.png" width="260" alt="A conversation with another device">
+  <img src="docs/files.png" width="260" alt="Files: a sent file marked delivered">
+</p>
+
 ## Joining a mesh
 
 The app cannot create a mesh yet; a device running the noscat CLI does that
