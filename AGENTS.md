@@ -173,6 +173,10 @@ Kotlin bindings regenerate with it.
   join requests. Tapping one opens the chat or tab (`NavRequest`; the
   activity is singleTop). POST_NOTIFICATIONS is asked at first start.
   Foreground pop-ups name devices, never npubs (`nameOf`, `scrub`).
+- Backup and device-to-device transfer are off (`allowBackup="false"`,
+  `res/xml/data_extraction_rules.xml` excludes everything): a restored
+  device dir would make two phones the same device with diverging mesh
+  state. A new phone joins as a new device.
 - Chats persist in `noBackupFilesDir/chats.json` (500 per conversation,
   saved debounced); Forget clears them.
 - Devices warns when no member is reachable from the internet
