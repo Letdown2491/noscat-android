@@ -14,10 +14,11 @@ android {
         applicationId = "io.github.letdown2491.noscat"
         minSdk = 26
         targetSdk = 35
-        // Lockstep with noscat: versionName is the noscat release, and
-        // versionCode goes up with every release.
-        versionCode = 5
-        versionName = "0.5.0"
+        // versionName shares noscat's major.minor (0.5 runs noscat 0.5);
+        // the patch counts app-only releases. versionCode goes up with
+        // every release.
+        versionCode = 6
+        versionName = "0.5.1"
     }
 
     // Release signing: keystore.properties at the repo root (never

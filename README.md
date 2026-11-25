@@ -26,9 +26,9 @@ The app cannot create a mesh yet; a device running the noscat CLI does that
    answer y. The phone joins and shows the device list.
 
 Once in the mesh, the phone approves join requests too: a device that scans
-this phone's code (tap the logo at the top right, then **Invite a device**) shows up on the Devices tab with Approve and
-Decline. Check the short device ID against the joining device's screen
-before approving.
+this phone's code (tap the logo at the top right, then **Invite a device**)
+shows up on the Devices tab with Approve and Decline. Check the short device
+ID against the joining device's screen before approving.
 
 In a private mesh (`noscat mesh private`, on a members-only relay such as
 noscat-relay) the member's QR also names the mesh's relay, and the phone

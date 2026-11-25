@@ -117,8 +117,9 @@ on a warm cache). The Rust build is the debug profile unless `PROFILE=release`
 (LTO; built with symbols because uniffi reads the bindings from them, stripped
 afterwards). `scripts/build-release.sh` does that plus a signed `assembleRelease`
 (signing from the git-ignored `keystore.properties`; the keystore lives outside the
-repo, never commit either). Version: `versionName` follows noscat (0.5.0),
-`versionCode` goes up every release.
+repo, never commit either). Version: `versionName` shares noscat's major.minor
+(0.5.x runs noscat 0.5) and its patch counts app-only releases (0.5.1 is the
+UX pass, matching noscat-desktop 0.5.1); `versionCode` goes up every release.
 
 ```
 ./scripts/build-native.sh local    # or a version number for a published crate
@@ -214,12 +215,12 @@ Kotlin bindings regenerate with it.
   Failure surfaces as `ChatFailed`; either event settles only the newest
   pending bubble. Tapping a failed bubble is `ClientHolder.retryChat` (the
   failed bubble goes, the text is sent as a new message); long-press opens
-  Delete (`deleteChat`, this phone only) and Retry. Nothing is resent
+  Copy, Delete (`deleteChat`, this phone only) and Try again. Nothing is resent
   automatically: the member may have it. Incoming messages arrive as
   `ChatMessage`.
 - Order: `displayOrder()` sorts the roster as noscat's `members()` does (by
   name, then unnamed; presence never reorders), because the roster keeps a
-  cached name when a fetch has none. This phone's card is first on Devices.
+  cached name when a fetch has none. This phone is first on Devices, in its own THIS PHONE section.
   The chat list shows every member, latest conversation first, then device
   order.
 - An outgoing send can be cancelled: `cancelTransfer(path, peer)` stops it
@@ -236,4 +237,5 @@ Kotlin bindings regenerate with it.
 - Commit messages: imperative, no em dashes.
 - When Gradle work happens, prefer lockfiles and pinned versions so builds are
   reproducible from a clean checkout.
-- Work on `master`; commit and push there. No tags until the 0.5.0 release.
+- Work on `master`; commit and push there. Releases are tagged `vX.Y.Z`
+  (latest: v0.5.1) with the signed APK attached.
