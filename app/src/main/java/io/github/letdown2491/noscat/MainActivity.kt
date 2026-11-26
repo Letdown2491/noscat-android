@@ -797,19 +797,15 @@ private fun DeviceRow(
                 }
             },
             trailingContent = {
-                Row {
+                // The two actions that matter most stay visible (Send a
+                // file; Terminal on devices that offer one); the overflow
+                // opens every action, the same menu as a long press.
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onSend) {
                         Icon(Icons.Outlined.AttachFile, contentDescription = "Send a file to $name")
                     }
-                    IconButton(onClick = onForward) {
-                        Icon(Icons.Outlined.SwapHoriz, contentDescription = "Forward a port to $name's shared service")
-                    }
-                    IconButton(onClick = onClipboard) {
-                        Icon(Icons.Outlined.ContentPaste, contentDescription = "Share this phone's clipboard with $name")
-                    }
-                    // Only devices that offer one (computers). After a
-                    // refusal it greys out; trying again is still allowed,
-                    // since the device may have changed its mind.
+                    // After a refusal it greys out; trying again is still
+                    // allowed, since the device may have changed its mind.
                     if (onTerminal != null) {
                         IconButton(onClick = onTerminal) {
                             Icon(
@@ -819,38 +815,43 @@ private fun DeviceRow(
                             )
                         }
                     }
+                    Box {
+                        IconButton(onClick = { menu = true }) {
+                            Icon(Icons.Outlined.MoreVert, contentDescription = "More actions for $name")
+                        }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Chat") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) },
+                                onClick = { menu = false; onChat() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Send a file") },
+                                leadingIcon = { Icon(Icons.Outlined.AttachFile, null) },
+                                onClick = { menu = false; onSend() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Forward a port") },
+                                leadingIcon = { Icon(Icons.Outlined.SwapHoriz, null) },
+                                onClick = { menu = false; onForward() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Share clipboard") },
+                                leadingIcon = { Icon(Icons.Outlined.ContentPaste, null) },
+                                onClick = { menu = false; onClipboard() },
+                            )
+                            if (onTerminal != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Open a terminal") },
+                                    leadingIcon = { Icon(Icons.Outlined.Terminal, null) },
+                                    onClick = { menu = false; onTerminal() },
+                                )
+                            }
+                        }
+                    }
                 }
             },
         )
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(
-                text = { Text("Chat") },
-                leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) },
-                onClick = { menu = false; onChat() },
-            )
-            DropdownMenuItem(
-                text = { Text("Send a file") },
-                leadingIcon = { Icon(Icons.Outlined.AttachFile, null) },
-                onClick = { menu = false; onSend() },
-            )
-            DropdownMenuItem(
-                text = { Text("Forward a port") },
-                leadingIcon = { Icon(Icons.Outlined.SwapHoriz, null) },
-                onClick = { menu = false; onForward() },
-            )
-            DropdownMenuItem(
-                text = { Text("Share clipboard") },
-                leadingIcon = { Icon(Icons.Outlined.ContentPaste, null) },
-                onClick = { menu = false; onClipboard() },
-            )
-            if (onTerminal != null) {
-                DropdownMenuItem(
-                    text = { Text(if (refused != null) "Open a terminal (refused before)" else "Open a terminal") },
-                    leadingIcon = { Icon(Icons.Outlined.Terminal, null) },
-                    onClick = { menu = false; onTerminal() },
-                )
-            }
-        }
     }
 }
 
