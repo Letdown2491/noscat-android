@@ -79,8 +79,8 @@ copies it for a bug report.
 **Terminal** opens the device's shell full screen, running as that
 device's user on that device. The device may ask its owner first ("Waiting
 for ... to approve"); a device without the app (a server running the CLI)
-offers a terminal only to devices it allows with `noscat allow <device>
-control`. The keyboard opens when the session starts (tap the screen to
+has no one to ask, so it offers a terminal only once it allows some device
+(`noscat allow <device> control`), and refuses every other device. The keyboard opens when the session starts (tap the screen to
 bring it back); a row of keys adds Esc, Ctrl, Alt, Tab, arrows, Home, End
 and Paste; drag to scroll back. Back ends the session. If a device refused,
 its Terminal button greys out. The phone itself hosts no terminal.
