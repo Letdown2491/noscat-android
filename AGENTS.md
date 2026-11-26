@@ -156,6 +156,11 @@ Install on a device (wireless debugging works; `adb` is not on PATH):
 ~/Android/Sdk/platform-tools/adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Debug builds log the Rust side to a file (`startDebugLog` in
+`ClientHolder.init`, debuggable builds only): `adb shell run-as
+io.github.letdown2491.noscat cat files/noscat-debug.log`. Logcat (`-s
+noscat:D`) has the app's own lines, including how long the start took.
+
 Kotlin: build the app with the Gradle wrapper (committed). The host has no system
 JDK; use the tarball JDK in `~/opt`:
 

@@ -72,7 +72,9 @@ the app tells Noscat at once, so connections recover in seconds.
 The logo at the top right shows the connection as a ring (green connected,
 amber connecting, red offline); tap it for the mesh, Invite a device,
 Settings and Disconnect. Settings > Diagnostics shows the event log; **Copy**
-copies it for a bug report.
+copies it for a bug report. Debug builds also write Noscat's own log (starts,
+relays, connections) to `noscat-debug.log` in the app's files:
+`adb shell run-as io.github.letdown2491.noscat cat files/noscat-debug.log`.
 
 ## Terminal and access
 
