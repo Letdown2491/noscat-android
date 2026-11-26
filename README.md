@@ -1,16 +1,16 @@
-# noscat android
+# Noscat for Android
 
-Android client for [noscat](https://github.com/Letdown2491/noscat), a private
+Android client for [Noscat](https://github.com/Letdown2491/noscat), a private
 device mesh on Nostr: membership is a Marmot (MLS) group on Nostr relays, and data
 goes device to device over FIPS. Native Kotlin (Compose) over a Rust UniFFI bridge;
-the protocol lives in the noscat workspace (`noscat-core`/`noscat-client`/
+the protocol lives in the Noscat workspace (`noscat-core`/`noscat-client`/
 `noscat-ffi`), so this repo contains no protocol code.
 
 Status: chat, file send/receive, port forwards to a member's services,
 clipboard sharing, joining a mesh by scanning a member's QR, and (new in
 0.6) terminals on the mesh's computers and a choice of who may send things
-to the phone. Released versions run noscat 0.5.0 (the `noscat-ffi` crate
-from crates.io); 0.6 is in development against a local noscat checkout
+to the phone. Released versions run Noscat 0.5.0 (the `noscat-ffi` crate
+from crates.io); 0.6 is in development against a local Noscat checkout
 (`./scripts/build-native.sh local`). Roadmap and agent guidance in
 [AGENTS.md](AGENTS.md).
 
@@ -22,7 +22,7 @@ from crates.io); 0.6 is in development against a local noscat checkout
 
 ## Joining a mesh
 
-The app cannot create a mesh yet; a device running the noscat CLI does that
+The app cannot create a mesh yet; a device running the Noscat CLI does that
 (`noscat mesh create <name>`).
 
 1. On a device in the mesh, show its pairing code: **Invite a device** in the
@@ -67,7 +67,7 @@ every member, latest conversation first. A message the other device never
 acknowledged is marked "not delivered": tap it to send the text again as a
 new message, or long-press any message for Copy and Delete (and Try again). Nothing is resent automatically, since the other device may have
 received it. When the phone switches networks (Wi-Fi to cellular and back),
-the app tells noscat at once, so connections recover in seconds.
+the app tells Noscat at once, so connections recover in seconds.
 
 The logo at the top right shows the connection as a ring (green connected,
 amber connecting, red offline); tap it for the mesh, Invite a device,

@@ -258,6 +258,10 @@ Kotlin bindings regenerate with it.
 
 ## Conventions
 
+- The product's name is **Noscat**: in UI text, launcher entries,
+  notifications and prose in docs. `noscat` stays lowercase where it is an
+  identifier: the command (`noscat up`), crates, packages, app ids, data
+  folders, the `noscat:` pairing scheme, and code formatting in docs.
 - Kotlin: package `io.github.letdown2491.noscat`, Compose + Material 3, minSdk 26.
 - Commit messages: imperative, no em dashes.
 - When Gradle work happens, prefer lockfiles and pinned versions so builds are
