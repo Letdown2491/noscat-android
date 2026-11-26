@@ -328,14 +328,14 @@ fun EmptyState(
     }
 }
 
-/** The noscat mark (the launcher icon's two layers, cropped as a
- * launcher crops them), in a rounded square. */
+/** The Noscat mark (the launcher icon's two layers, cropped as a
+ * launcher crops them), in a circle. */
 @Composable
 fun Logo(size: Dp) {
     Box(
         Modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.24f)),
+            .clip(CircleShape),
     ) {
         listOf(R.drawable.ic_launcher_background, R.drawable.ic_launcher_foreground).forEach { res ->
             Image(
@@ -380,7 +380,7 @@ fun meshStatusText(): String = when (meshState()) {
 fun LogoHalo(size: Dp) {
     Box(
         Modifier
-            .border(BorderStroke(2.dp, meshState().color()), RoundedCornerShape(size * 0.3f))
+            .border(BorderStroke(2.dp, meshState().color()), CircleShape)
             .padding(3.dp),
     ) { Logo(size) }
 }
