@@ -48,6 +48,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -459,11 +463,16 @@ private fun SheetItem(icon: ImageVector, label: String, enabled: Boolean = true,
 fun InviteDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val npub = ClientHolder.myNpub ?: return onDismiss()
-    // `noscat:<npub>` only: the FFI has no pairing_uri() yet, so a private
-    // mesh's relay hints are missing (noscat issue #20, for 0.6.0). Once it
-    // lands, cache it at client start like myNpub and use it here.
-    val code = remember(npub) { Pairing.encode(npub) }
-    val qr = remember(code) { Pairing.qrBitmap(code, 720).asImageBitmap() }
+    // Read when the dialog opens, never cached: a mesh can turn private
+    // while the app runs, and its code then carries the mesh's relays
+    // (`?relay=`). pairingUri() blocks, so it runs off the main thread; the
+    // QR waits for it rather than showing a code without the relays.
+    val code by produceState<String?>(null, npub) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { ClientHolder.client?.pairingUri() }.getOrNull() ?: Pairing.encode(npub)
+        }
+    }
+    val qr = remember(code) { code?.let { Pairing.qrBitmap(it, 720).asImageBitmap() } }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Invite a device") },
@@ -477,14 +486,17 @@ fun InviteDialog(onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Surface(color = Color.White, shape = RoundedCornerShape(12.dp)) {
-                    Image(
-                        qr,
-                        contentDescription = "This phone's pairing code",
-                        modifier = Modifier.padding(8.dp).size(220.dp),
-                    )
+                    Box(Modifier.padding(8.dp).size(220.dp), contentAlignment = Alignment.Center) {
+                        if (qr != null) {
+                            Image(qr, contentDescription = "This phone's pairing code", modifier = Modifier.fillMaxSize())
+                        } else {
+                            CircularProgressIndicator(color = Color.Black.copy(alpha = 0.5f))
+                        }
+                    }
                 }
+                val code = code ?: ""
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
+                    OutlinedButton(enabled = code.isNotEmpty(), onClick = {
                         context.getSystemService(ClipboardManager::class.java)
                             ?.setPrimaryClip(ClipData.newPlainText("noscat pairing code", code))
                         android.widget.Toast.makeText(context, "Pairing code copied", android.widget.Toast.LENGTH_SHORT).show()
@@ -493,7 +505,7 @@ fun InviteDialog(onDismiss: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Text("Copy")
                     }
-                    OutlinedButton(onClick = { sharePairingCode(context, code) }) {
+                    OutlinedButton(enabled = code.isNotEmpty(), onClick = { sharePairingCode(context, code) }) {
                         Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Share")
