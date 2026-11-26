@@ -73,6 +73,9 @@ dependencies {
     // QR generation for pairing (scanning is handled separately).
     implementation("com.google.zxing:core:3.5.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // The terminal: Termux's emulator and renderer (Apache 2.0, see
+    // NOTICE), driven by remote bytes; no local process.
+    implementation("com.github.termux.termux-app:terminal-view:v0.118.0")
     // QR: core encodes the npub to a bitmap; embedded provides the scan activity.
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0@aar")

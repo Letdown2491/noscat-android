@@ -101,6 +101,23 @@ layer stays native Kotlin instead of a cross-platform framework.
   a temporary device for `filesDir/device`; it is released when the call
   returns, and only then does `ClientHolder.restart` start the app's
   client there (one device per directory).
+- `app/.../Terminal.kt` (0.6): a terminal on a member. `RemoteTerminal`
+  holds one session's state; `RemoteTerminalView` draws Termux's
+  `TerminalEmulator` with its `TerminalRenderer` (Apache 2.0, see NOTICE;
+  only the emulator and renderer: Termux's `TerminalSession` forks a local
+  process, which this app never does) and turns keys into terminal bytes;
+  `TerminalScreen` is the full-screen page with an extra keys row (Esc,
+  sticky Ctrl and Alt, Tab, arrows, Home, End, Paste). The session starts
+  once the view knows its size (`ClientHolder.startTerminal`, blocking on
+  a worker: the member may ask its user first, shown as "Waiting for X to
+  approve"); Back closes it, which ends the session. One terminal at a
+  time. The Terminal icon sits on rows of devices whose `control` is set
+  (computers); a refusal greys it (`ClientHolder.terminalRefused`). A
+  phone hosts no terminal and never enables access prompts.
+- Settings > Access (0.6): whether other devices may send things (files,
+  chat, clipboard) to this phone, for every device and per device, with
+  Reset back to the default. The only access group that applies to a
+  phone: it serves no ports and hosts no terminal. Kept on the phone.
 - `app/.../NoscatService.kt`: the foreground service that keeps the client
   alive while the app is in the background.
 - `scripts/build-native.sh`: cross-compiles the `noscat-ffi` crate

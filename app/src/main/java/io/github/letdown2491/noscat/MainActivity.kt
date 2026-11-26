@@ -42,6 +42,11 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.runtime.produceState
+import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Switch
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -71,6 +76,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.noscat.AccessGroup
+import uniffi.noscat.AccessRule
 import uniffi.noscat.MeshMember
 import uniffi.noscat.generateIdentity
 import uniffi.noscat.meshJoin
@@ -268,6 +275,12 @@ private fun Root() {
     val openChat: (String) -> Unit = { npub ->
         chatPeer = npub
         tab = Tab.Chat
+    }
+
+    // A terminal takes the whole screen while it is open; Back closes it.
+    ClientHolder.terminal?.let { t ->
+        TerminalScreen(t, onClose = { ClientHolder.closeTerminal() })
+        return
     }
 
     Scaffold(
@@ -701,6 +714,9 @@ private fun DevicesScreen(onOpenChat: (String) -> Unit, onInvite: () -> Unit) {
                             if (text.isNullOrEmpty()) toast(context, "The clipboard is empty")
                             else clipTarget = m.npub to text
                         },
+                        onTerminal = if (m.control) {
+                            { ClientHolder.openTerminal(m.npub, memberLabel(m)) }
+                        } else null,
                     )
                 }
             }
@@ -757,8 +773,10 @@ private fun DeviceRow(
     onSend: () -> Unit,
     onForward: () -> Unit,
     onClipboard: () -> Unit,
+    onTerminal: (() -> Unit)?,
 ) {
     val name = memberLabel(member)
+    val refused = ClientHolder.terminalRefused[member.npub]
     val presence = member.presence(now)
     var menu by remember { mutableStateOf(false) }
     Box {
@@ -789,6 +807,18 @@ private fun DeviceRow(
                     IconButton(onClick = onClipboard) {
                         Icon(Icons.Outlined.ContentPaste, contentDescription = "Share this phone's clipboard with $name")
                     }
+                    // Only devices that offer one (computers). After a
+                    // refusal it greys out; trying again is still allowed,
+                    // since the device may have changed its mind.
+                    if (onTerminal != null) {
+                        IconButton(onClick = onTerminal) {
+                            Icon(
+                                Icons.Outlined.Terminal,
+                                contentDescription = refused ?: "Open a terminal on $name",
+                                tint = if (refused != null) MaterialTheme.colorScheme.outline else LocalContentColor.current,
+                            )
+                        }
+                    }
                 }
             },
         )
@@ -813,6 +843,13 @@ private fun DeviceRow(
                 leadingIcon = { Icon(Icons.Outlined.ContentPaste, null) },
                 onClick = { menu = false; onClipboard() },
             )
+            if (onTerminal != null) {
+                DropdownMenuItem(
+                    text = { Text(if (refused != null) "Open a terminal (refused before)" else "Open a terminal") },
+                    leadingIcon = { Icon(Icons.Outlined.Terminal, null) },
+                    onClick = { menu = false; onTerminal() },
+                )
+            }
         }
     }
 }
@@ -1403,6 +1440,8 @@ private fun SettingsScreen(
             }
         }
 
+        AccessCard()
+
         SettingsCard("Appearance") {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Theme", style = MaterialTheme.typography.titleSmall)
@@ -1532,6 +1571,67 @@ private fun SettingsScreen(
 }
 
 /** A titled card of settings rows. */
+/** Who may send things to this phone (files, chat, clipboard). A phone
+ * serves no ports and hosts no terminal, so "send things" is the only
+ * group that applies here. Rules stay on this phone. */
+@Composable
+private fun AccessCard() {
+    val scope = rememberCoroutineScope()
+    var version by remember { mutableStateOf(0) }
+    val members = ClientHolder.roster.orEmpty().filter { !it.thisDevice }.displayOrder()
+    val keys = members.map { it.npub }
+    val rules by produceState<AccessView?>(null, version, keys, ClientHolder.client) {
+        value = withContext(Dispatchers.IO) {
+            val defaults = ClientHolder.accessDefaults() ?: return@withContext null
+            val custom = ClientHolder.accessCustom()
+            AccessView(
+                everyone = defaults.send == AccessRule.ALLOW,
+                members = keys.associateWith { (ClientHolder.accessOf(it) ?: defaults).send == AccessRule.ALLOW },
+                custom = custom,
+            )
+        }
+    }
+    val set: (String?, Boolean?) -> Unit = { npub, allow ->
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                if (npub != null && allow == null) ClientHolder.resetAccess(npub)
+                else ClientHolder.setAccess(npub, AccessGroup.SEND, if (allow == true) AccessRule.ALLOW else AccessRule.DENY)
+            }
+            version++
+        }
+    }
+    SettingsCard("Access") {
+        Text(
+            "Which devices can send files, messages and clipboard text to this phone. The choice stays on this phone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        )
+        val r = rules
+        SettingRow("Every device", "Unless set below") {
+            Switch(checked = r?.everyone ?: true, enabled = r != null, onCheckedChange = { set(null, it) })
+        }
+        members.forEach { m ->
+            CardDivider()
+            val custom = r != null && m.npub in r.custom
+            SettingRow(memberLabel(m), if (custom) "Set for this device" else "As every device") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (custom) {
+                        TextButton(onClick = { set(m.npub, null) }) { Text("Reset") }
+                    }
+                    Switch(
+                        checked = r?.members?.get(m.npub) ?: true,
+                        enabled = r != null,
+                        onCheckedChange = { set(m.npub, it) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class AccessView(val everyone: Boolean, val members: Map<String, Boolean>, val custom: Set<String>)
+
 @Composable
 private fun SettingsCard(title: String, danger: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     Column {

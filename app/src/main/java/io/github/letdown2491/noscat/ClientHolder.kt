@@ -19,6 +19,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import uniffi.noscat.AccessGroup
+import uniffi.noscat.AccessRule
+import uniffi.noscat.AccessRules
 import uniffi.noscat.Event
 import uniffi.noscat.EventListener
 import uniffi.noscat.ForwardInfo
@@ -116,6 +119,7 @@ object ClientHolder {
                     put("admin", m.admin)
                     put("thisDevice", m.thisDevice)
                     put("reachable", m.reachable)
+                    put("control", m.control)
                     m.name?.let { put("name", it) } ?: put("name", JSONObject.NULL)
                     m.lastSeenSecs?.let { put("lastSeenSecs", it.toLong()) }
                         ?: put("lastSeenSecs", JSONObject.NULL)
@@ -146,6 +150,7 @@ object ClientHolder {
                 admin = m.optBoolean("admin", true),
                 thisDevice = m.optBoolean("thisDevice", false),
                 reachable = m.optBoolean("reachable", false),
+                control = m.optBoolean("control", false),
                 // Live state, never saved: the running client says.
                 connected = false,
             )
@@ -212,6 +217,7 @@ object ClientHolder {
                                 npub = m.npub,
                                 admin = m.admin,
                                 reachable = p.reachable || m.reachable,
+                                control = p.control || m.control,
                                 connected = m.connected,
                                 lastSeenSecs = p.lastSeenSecs?.let { it + elapsedSecs },
                             )
@@ -673,7 +679,7 @@ object ClientHolder {
                 ),
                 object : EventListener {
                     override fun onEvent(event: Event) {
-                        logLine(render(event))
+                        if (event !is Event.TerminalOutput) logLine(render(event))
                         onEventState(event)
                         // Transfers, chats and join requests complete out of
                         // band: a pop-up or a notification, with names.
@@ -840,6 +846,32 @@ object ClientHolder {
             is Event.MeshJoined, is Event.Roster, is Event.MemberSeen,
             is Event.MeshLeft -> syncRoster()
             is Event.MeshChangeUndone -> {}
+            // A phone hosts no terminal and asks nobody: the prompts are
+            // never enabled, so these do not arrive.
+            is Event.AccessRequest, is Event.AccessResolved,
+            is Event.TerminalOpened, is Event.TerminalClosed -> {}
+            is Event.TerminalWaiting -> main.post {
+                terminal?.takeIf { it.peer == event.peer && it.state == RemoteTerminal.State.Opening }
+                    ?.state = RemoteTerminal.State.Waiting
+            }
+            // One terminal at a time: output before its handle arrives
+            // (the reader starts first) belongs to the one opening.
+            is Event.TerminalOutput -> main.post {
+                terminal?.takeIf { it.session == null || it.session == event.session }?.let {
+                    it.session = event.session
+                    it.onOutput(event.data)
+                }
+            }
+            is Event.TerminalExited -> main.post {
+                terminal?.takeIf { it.session == null || it.session == event.session }?.ended(
+                    when {
+                        event.code == null -> "Connection lost: ${event.error ?: "unknown error"}"
+                        event.code == 0 -> "The session ended"
+                        event.code == -1 -> "${terminal?.name ?: "The device"} ended the session"
+                        else -> "The session ended (exit ${event.code})"
+                    },
+                )
+            }
             // A device that scanned this phone's QR asks to join: the app
             // shows Approve / Decline, and a notification (announce).
             is Event.JoinRequest -> main.post {
@@ -1190,7 +1222,76 @@ object ClientHolder {
             "another device changed the mesh at the same moment and won; try again"
         is Event.MeshLeft -> "this device is no longer in the mesh"
         is Event.JoinRequest -> "${event.name ?: event.peer} asks to join the mesh"
+        is Event.AccessRequest -> "${event.peer} asks for ${event.group}"
+        is Event.AccessResolved -> "${event.peer} ${event.group}: ${event.outcome}"
+        is Event.TerminalWaiting -> "waiting for ${event.peer} to approve the terminal"
+        is Event.TerminalOpened -> "terminal opened by ${event.peer}"
+        is Event.TerminalClosed -> "terminal of ${event.peer} closed"
+        is Event.TerminalOutput -> ""
+        is Event.TerminalExited -> "terminal ended: " + (event.code?.let { "exit $it" } ?: event.error.orEmpty())
     }
+
+    // ---- terminal ---------------------------------------------------------
+
+    /** The terminal open on a member (full screen while set). */
+    var terminal: RemoteTerminal? by mutableStateOf(null)
+
+    /** Members that refused this phone a terminal: npub to the reason, so
+     * the Terminal icon greys out with it. Cleared when one opens. */
+    val terminalRefused = mutableStateMapOf<String, String>()
+
+    /** Show the terminal screen; the session starts once its view knows
+     * its size ([RemoteTerminal.onSize]). */
+    fun openTerminal(peer: String, name: String) {
+        terminal?.close()
+        terminal = RemoteTerminal(peer, name)
+    }
+
+    fun closeTerminal() {
+        terminal?.close()
+        terminal = null
+    }
+
+    /** Called by [RemoteTerminal] on the main thread; blocks a worker
+     * thread until the member's shell started (or it says no). */
+    fun startTerminal(t: RemoteTerminal, cols: Int, rows: Int) {
+        val c = client ?: run { t.ended("Not connected"); return }
+        Thread {
+            try {
+                val h = c.openTerminal(t.peer, cols.toUShort(), rows.toUShort())
+                main.post {
+                    terminalRefused.remove(t.peer)
+                    t.started(h)
+                }
+            } catch (e: Throwable) {
+                val msg = e.message.orEmpty()
+                val text = when {
+                    "not permitted" in msg -> "${t.name} does not allow this phone to open a terminal"
+                    "does not offer" in msg -> "${t.name} does not offer a terminal"
+                    else -> "Could not open a terminal: $msg"
+                }
+                main.post {
+                    if ("not permitted" in msg || "does not offer" in msg) terminalRefused[t.peer] = text
+                    t.ended(text)
+                }
+            }
+        }.start()
+    }
+
+    // ---- access (who may do what to this phone) ---------------------------
+    // Blocking FFI calls: run them on Dispatchers.IO.
+
+    fun accessDefaults(): AccessRules? = runCatching { client?.accessDefaults() }.getOrNull()
+
+    fun accessOf(npub: String): AccessRules? = runCatching { client?.accessOf(npub) }.getOrNull()
+
+    fun accessCustom(): Set<String> = runCatching { client?.accessCustom()?.toSet() }.getOrNull() ?: emptySet()
+
+    /** Null npub: the default for every member; null rule: back to it. */
+    fun setAccess(npub: String?, group: AccessGroup, rule: AccessRule?): Boolean =
+        runCatching { client?.setAccess(npub, group, rule) != null }.getOrDefault(false)
+
+    fun resetAccess(npub: String): Boolean = runCatching { client?.resetAccess(npub) != null }.getOrDefault(false)
 }
 
 /**
