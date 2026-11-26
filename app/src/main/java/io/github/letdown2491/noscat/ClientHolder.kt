@@ -552,14 +552,26 @@ object ClientHolder {
     fun init(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
+        // Debug builds log noscat's start and connections to a file
+        // (adb pull from the app's files dir): phones have no stderr.
+        if (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            runCatching {
+                uniffi.noscat.startDebugLog(
+                    java.io.File(context.filesDir, "noscat-debug.log").path,
+                    "noscat_core=debug,noscat_client=debug,nostr_sdk=info,fips_core=warn,openmls=off",
+                )
+            }
+        }
         // Seal the device files (identity, mesh state) before anything
         // touches the device dir; plain ones from before migrate.
+        val keyBegan = android.os.SystemClock.elapsedRealtime()
         when (val k = runCatching { IdentityStore.storageKey(context) }
             .getOrElse { IdentityStore.StorageKeyResult.Unreadable(it) }) {
             is IdentityStore.StorageKeyResult.Ok -> uniffi.noscat.setStorageKey(k.key)
             is IdentityStore.StorageKeyResult.Unreadable ->
                 logLine("storage key unreadable, the device files stay sealed: ${k.error}")
         }
+        logLine("storage key read in ${android.os.SystemClock.elapsedRealtime() - keyBegan} ms")
         roster = loadRoster()?.displayOrder()
         meshName = AppPrefs.meshName(context)
         loadTransfers()
@@ -664,6 +676,7 @@ object ClientHolder {
     @Synchronized
     fun getOrStart(secretHex: String?, meshDir: String? = null): NoscatClient? {
         client?.let { return it }
+        val began = android.os.SystemClock.elapsedRealtime()
         return try {
             val c = NoscatClient(
                 uniffi.noscat.ClientConfig(
@@ -692,8 +705,9 @@ object ClientHolder {
             myNpub = runCatching { c.npub() }.getOrNull()
             if (meshDir != null) readMeshName(c)
             this.meshDir = meshDir
+            val took = android.os.SystemClock.elapsedRealtime() - began
             logLine(
-                if (meshDir != null) "client started (mesh joined)" else "client started",
+                (if (meshDir != null) "client started (mesh joined)" else "client started") + " in $took ms",
             )
             if (meshDir != null) {
                 // Node mode: publish the advert and dispatch inbound streams
