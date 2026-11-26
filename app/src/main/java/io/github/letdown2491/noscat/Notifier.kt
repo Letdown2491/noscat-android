@@ -97,7 +97,7 @@ object Notifier {
             Notification.Builder(ctx, JOINS)
                 .setSmallIcon(android.R.drawable.ic_menu_add)
                 .setContentTitle("$who wants to join your mesh")
-                .setContentText("Open noscat to approve or decline")
+                .setContentText("Open Noscat to approve or decline")
                 .setAutoCancel(true)
                 .setContentIntent(open(ctx, 2) { putExtra(EXTRA_TAB, "devices") })
                 .build(),

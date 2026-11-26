@@ -498,7 +498,7 @@ fun InviteDialog(onDismiss: () -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(enabled = code.isNotEmpty(), onClick = {
                         context.getSystemService(ClipboardManager::class.java)
-                            ?.setPrimaryClip(ClipData.newPlainText("noscat pairing code", code))
+                            ?.setPrimaryClip(ClipData.newPlainText("Noscat pairing code", code))
                         android.widget.Toast.makeText(context, "Pairing code copied", android.widget.Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))

@@ -446,7 +446,7 @@ private fun JoinScreen(onJoined: (String) -> Unit) {
             ownerNpub = np
             ownerTarget = raw
             failed = false
-        } ?: if (result.contents != null) toast(context, "That code is not a noscat pairing code") else Unit
+        } ?: if (result.contents != null) toast(context, "That code is not a Noscat pairing code") else Unit
     }
 
     val column = Modifier
@@ -2175,7 +2175,7 @@ private fun copyToCache(context: Context, uri: Uri): File? = runCatching {
 
 private fun copy(context: Context, text: String, confirmation: String) {
     context.getSystemService(ClipboardManager::class.java)
-        ?.setPrimaryClip(ClipData.newPlainText("noscat", text))
+        ?.setPrimaryClip(ClipData.newPlainText("Noscat", text))
     toast(context, confirmation)
 }
 

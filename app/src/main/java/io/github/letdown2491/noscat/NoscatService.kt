@@ -34,12 +34,12 @@ class NoscatService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "mesh connection",
+                "Mesh connection",
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("noscat")
+            .setContentTitle("Noscat")
             .setContentText("keeping your mesh connection alive")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)

@@ -1028,7 +1028,7 @@ object ClientHolder {
         val ctx = appContext ?: return
         main.post {
             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("noscat", text))
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("Noscat", text))
         }
     }
 
