@@ -14,11 +14,11 @@ android {
         applicationId = "io.github.letdown2491.noscat"
         minSdk = 26
         targetSdk = 35
-        // versionName shares noscat's major.minor (0.5 runs noscat 0.5);
+        // versionName shares noscat's major.minor (0.6 runs noscat 0.6);
         // the patch counts app-only releases. versionCode goes up with
         // every release.
-        versionCode = 6
-        versionName = "0.5.1"
+        versionCode = 7
+        versionName = "0.6.0"
     }
 
     // Release signing: keystore.properties at the repo root (never
