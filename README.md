@@ -6,9 +6,12 @@ goes device to device over FIPS. Native Kotlin (Compose) over a Rust UniFFI brid
 the protocol lives in the noscat workspace (`noscat-core`/`noscat-client`/
 `noscat-ffi`), so this repo contains no protocol code.
 
-Status: phase 1 in progress: chat, file send/receive, port forwards to a member's
-services, and joining a mesh by scanning a member's QR. It is on noscat 0.5.0
-(the `noscat-ffi` crate from crates.io). Roadmap and agent guidance in
+Status: chat, file send/receive, port forwards to a member's services,
+clipboard sharing, joining a mesh by scanning a member's QR, and (new in
+0.6) terminals on the mesh's computers and a choice of who may send things
+to the phone. Released versions run noscat 0.5.0 (the `noscat-ffi` crate
+from crates.io); 0.6 is in development against a local noscat checkout
+(`./scripts/build-native.sh local`). Roadmap and agent guidance in
 [AGENTS.md](AGENTS.md).
 
 <p align="center">
@@ -40,9 +43,8 @@ In a private mesh (`noscat mesh private`, on a members-only relay such as
 noscat-relay) the member's QR also names the mesh's relay, and the phone
 joins through it alone: nothing of it, not even its key package, reaches the
 public relays. Pasting works too with the whole code from
-`noscat mesh qr`. The phone's own Invite code does not carry the relays yet
-([noscat#20](https://github.com/Letdown2491/noscat/issues/20)); invite into a
-private mesh from a computer for now.
+`noscat mesh qr`. The phone's own Invite code names the relays too, so a
+phone can invite into a private mesh as well (0.6).
 
 Every mesh needs one member reachable from the internet; on one Wi-Fi network,
 devices find each other directly.
@@ -57,8 +59,10 @@ one next comes online.
 ## Devices and chat
 
 Devices are listed this phone first, then by name; being online never moves a
-device. Tap a device to chat with it; its icons send a file, forward a port
-and share the clipboard (shown to you before it is sent). The Chat tab lists
+device. Tap a device to chat with it. Its row shows **Send a file**,
+**Terminal** on devices that offer one, and **More** (also a long press) for
+every action: chat, send a file, forward a port, share the clipboard (shown
+to you before it is sent) and open a terminal. The Chat tab lists
 every member, latest conversation first. A message the other device never
 acknowledged is marked "not delivered": tap it to send the text again as a
 new message, or long-press any message for Copy and Delete (and Try again). Nothing is resent automatically, since the other device may have
@@ -69,6 +73,21 @@ The logo at the top right shows the connection as a ring (green connected,
 amber connecting, red offline); tap it for the mesh, Invite a device,
 Settings and Disconnect. Settings > Diagnostics shows the event log; **Copy**
 copies it for a bug report.
+
+## Terminal and access
+
+**Terminal** opens the device's shell full screen, running as that
+device's user on that device. The device may ask its owner first ("Waiting
+for ... to approve"); a device without the app (a server running the CLI)
+offers a terminal only to devices it allows with `noscat allow <device>
+control`. The keyboard opens when the session starts (tap the screen to
+bring it back); a row of keys adds Esc, Ctrl, Alt, Tab, arrows, Home, End
+and Paste; drag to scroll back. Back ends the session. If a device refused,
+its Terminal button greys out. The phone itself hosts no terminal.
+
+Settings > **Access** chooses which devices may send files, messages and
+clipboard text to this phone: a rule for every device, and one per device
+where it should differ. The choice stays on the phone.
 
 ## Presence
 

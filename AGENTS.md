@@ -61,8 +61,10 @@ layer stays native Kotlin instead of a cross-platform framework.
   the mesh sheet and the Invite dialog. Screens: the join flow (scan or
   paste a pairing code, then wait for approval showing the short ID to
   compare), then four tabs in the desktop sidebar's order: Devices (THIS
-  PHONE with rename, OTHER DEVICES; tap a row to chat, icons for send a
-  file, forward and share clipboard (previewed first), long-press for all),
+  PHONE with rename, OTHER DEVICES; tap a row to chat; on the row Send a
+  file, Terminal (devices that offer one) and a More button whose menu,
+  anchored at it, has every action: chat, send a file, forward, share
+  clipboard (previewed first), terminal. Long-press opens the same menu),
   Chat (list with last message, time, unread; a conversation hides the tab
   bar and has its own top bar), Files (Received/Sent segmented; Clear sent
   history is in the top bar's overflow menu, Sent side only), Services
@@ -110,7 +112,10 @@ layer stays native Kotlin instead of a cross-platform framework.
   sticky Ctrl and Alt, Tab, arrows, Home, End, Paste). The session starts
   once the view knows its size (`ClientHolder.startTerminal`, blocking on
   a worker: the member may ask its user first, shown as "Waiting for X to
-  approve"); Back closes it, which ends the session. One terminal at a
+  approve"); Back closes it, which ends the session. The keyboard opens
+  when the session starts; a tap brings it back and a drag scrolls back
+  (the gesture listener claims `onDown`, or the view never sees the rest
+  of a gesture). One terminal at a
   time. The Terminal icon sits on rows of devices whose `control` is set
   (computers); a refusal greys it (`ClientHolder.terminalRefused`). A
   phone hosts no terminal and never enables access prompts.
