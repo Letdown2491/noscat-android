@@ -132,7 +132,7 @@ class RemoteTerminal(val peer: String, val name: String) {
         handle = h
         session = h.id()
         state = State.Open
-        view?.let { v -> emulator?.let { e -> onSize(e.mColumns, e.mRows) }; v.invalidate() }
+        view?.let { v -> emulator?.let { e -> onSize(e.mColumns, e.mRows) }; v.invalidate(); v.showKeyboard() }
     }
 
     /** Main thread. */
@@ -190,6 +190,10 @@ class RemoteTerminalView(context: Context, private val t: RemoteTerminal) : View
     private var scrollRemainder = 0f
 
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        // Claim the gesture from its first touch: without this the view
+        // never sees the rest of it, so taps (the keyboard) and drags
+        // (scrollback) went nowhere.
+        override fun onDown(e: MotionEvent) = true
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             showKeyboard()
             return true
@@ -232,7 +236,9 @@ class RemoteTerminalView(context: Context, private val t: RemoteTerminal) : View
 
     fun showKeyboard() {
         requestFocus()
-        context.getSystemService(InputMethodManager::class.java)?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        // After focus settles; an implicit request is ignored on some
+        // keyboards, so this one is explicit.
+        post { context.getSystemService(InputMethodManager::class.java)?.showSoftInput(this, 0) }
     }
 
     fun paste() {
