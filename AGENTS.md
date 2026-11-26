@@ -73,7 +73,10 @@ layer stays native Kotlin instead of a cross-platform framework.
   button at the top right opens the mesh sheet (mesh name, "Connected N of
   M" counting other devices, Invite a device, Settings, Disconnect or
   Reconnect), and Settings opens as a page with a back arrow, in cards:
-  This phone, Appearance, Diagnostics, Danger zone. Disconnect acts at once
+  This phone, Network (the mesh's STUN servers as an editable
+  comma-separated `ip:port` field: `meshStun`/`setMeshStun`, as the
+  desktop's Settings > Network), Access, Appearance, Diagnostics, Danger
+  zone. Disconnect acts at once
   (Reconnect undoes it); only Forget asks. Disconnect keeps the
   phone a member: `ClientHolder.disconnect` closes the client and sets the
   `disconnected` pref, so it stays offline across restarts until

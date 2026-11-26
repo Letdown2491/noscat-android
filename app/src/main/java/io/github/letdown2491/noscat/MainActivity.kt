@@ -1441,6 +1441,8 @@ private fun SettingsScreen(
             }
         }
 
+        NetworkCard()
+
         AccessCard()
 
         SettingsCard("Appearance") {
@@ -1627,6 +1629,64 @@ private fun AccessCard() {
                     )
                 }
             }
+        }
+    }
+}
+
+/** The mesh's STUN servers, as on the desktop's Settings > Network: shared
+ * by every member, used from each device's next start. */
+@Composable
+private fun NetworkCard() {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var version by remember { mutableStateOf(0) }
+    val loaded by produceState<List<String>?>(null, version, ClientHolder.client) {
+        value = withContext(Dispatchers.IO) { ClientHolder.meshStun() }
+    }
+    var field by remember { mutableStateOf("") }
+    var seen by remember { mutableStateOf<List<String>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    // Fill the field when the list arrives or changes.
+    if (loaded != null && loaded != seen) {
+        field = loaded!!.joinToString(", ")
+        seen = loaded
+    }
+    val typed = field.split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }
+    SettingsCard("Network") {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("STUN servers", style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = field,
+                    onValueChange = { field = it; error = null },
+                    singleLine = true,
+                    enabled = loaded != null,
+                    placeholder = { Text("None set (ip:port, ...)") },
+                    isError = error != null,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    enabled = loaded != null && typed != seen,
+                    onClick = {
+                        scope.launch {
+                            val failed = withContext(Dispatchers.IO) { ClientHolder.setMeshStun(typed) }
+                            if (failed == null) {
+                                Toast.makeText(context, "STUN servers saved. Devices use them from their next start.", Toast.LENGTH_SHORT).show()
+                                version++
+                            } else {
+                                error = failed
+                            }
+                        }
+                    },
+                ) { Text("Save") }
+            }
+            Text(
+                error ?: "How the mesh's devices learn their public address, as ip:port, separated by commas. " +
+                    "Shared with every member. Empty: public servers, or none on a private mesh.",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

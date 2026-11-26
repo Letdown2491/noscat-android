@@ -1292,6 +1292,17 @@ object ClientHolder {
         runCatching { client?.setAccess(npub, group, rule) != null }.getOrDefault(false)
 
     fun resetAccess(npub: String): Boolean = runCatching { client?.resetAccess(npub) != null }.getOrDefault(false)
+
+    // ---- the mesh's STUN servers (blocking: Dispatchers.IO) ------------------
+
+    /** Null when no client runs. */
+    fun meshStun(): List<String>? = runCatching { client?.meshStun() }.getOrNull()
+
+    /** Replace the list; null on success, else what went wrong. */
+    fun setMeshStun(servers: List<String>): String? {
+        val c = client ?: return "This phone isn't connected."
+        return runCatching { c.setMeshStun(servers) }.exceptionOrNull()?.let { it.message ?: it.toString() }
+    }
 }
 
 /**

@@ -85,6 +85,10 @@ bring it back); a row of keys adds Esc, Ctrl, Alt, Tab, arrows, Home, End
 and Paste; drag to scroll back. Back ends the session. If a device refused,
 its Terminal button greys out. The phone itself hosts no terminal.
 
+Settings > **Network** lists the mesh's STUN servers (`ip:port`, comma
+separated), from which its devices learn their public address; a change is
+shared with every member and used from each device's next start.
+
 Settings > **Access** chooses which devices may send files, messages and
 clipboard text to this phone: a rule for every device, and one per device
 where it should differ. The choice stays on the phone.
