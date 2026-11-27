@@ -17,8 +17,8 @@ android {
         // versionName shares noscat's major.minor (0.7 runs noscat 0.7);
         // the patch counts app-only releases. versionCode goes up with
         // every release.
-        versionCode = 8
-        versionName = "0.7.0"
+        versionCode = 9
+        versionName = "0.7.1"
     }
 
     // Release signing: keystore.properties at the repo root (never

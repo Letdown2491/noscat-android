@@ -272,4 +272,4 @@ Kotlin bindings regenerate with it.
 - When Gradle work happens, prefer lockfiles and pinned versions so builds are
   reproducible from a clean checkout.
 - Work on `master`; commit and push there. Releases are tagged `vX.Y.Z`
-  (latest: v0.7.0) with the signed APK attached.
+  (latest: v0.7.1) with the signed APK attached.
