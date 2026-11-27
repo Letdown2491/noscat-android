@@ -11,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import androidx.compose.runtime.getValue
 import uniffi.noscat.MeshMember
+import uniffi.noscat.MemberState
 import uniffi.noscat.meshLeave
 import uniffi.noscat.meshMembers
 import uniffi.noscat.meshSync
@@ -120,6 +121,7 @@ object ClientHolder {
                     put("thisDevice", m.thisDevice)
                     put("reachable", m.reachable)
                     put("control", m.control)
+                    put("state", m.state.name)
                     m.name?.let { put("name", it) } ?: put("name", JSONObject.NULL)
                     m.lastSeenSecs?.let { put("lastSeenSecs", it.toLong()) }
                         ?: put("lastSeenSecs", JSONObject.NULL)
@@ -153,6 +155,8 @@ object ClientHolder {
                 control = m.optBoolean("control", false),
                 // Live state, never saved: the running client says.
                 connected = false,
+                state = runCatching { MemberState.valueOf(m.optString("state")) }
+                    .getOrDefault(MemberState.ACTIVE),
             )
         }
     }.getOrNull()
@@ -326,9 +330,17 @@ object ClientHolder {
         if (i < 0 || joinRequests[i].approving) return
         joinRequests[i] = joinRequests[i].copy(approving = true)
         Thread {
-            val err = runCatching { c.invite(npub) }.exceptionOrNull()
+            val res = runCatching { c.invite(npub) }
+            val err = res.exceptionOrNull()
             main.post {
                 if (err == null) {
+                    if (res.getOrNull() == false) {
+                        // Added, but no relay took the invitation yet; the
+                        // client resends it while it runs.
+                        appContext?.let {
+                            toast(it, "Added; its invitation hasn't gone out yet and is retried while Noscat runs")
+                        }
+                    }
                     joinRequests.removeAll { it.npub == npub }
                     Notifier.cancelJoin(appContext, npub)
                     syncRoster()

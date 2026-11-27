@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uniffi.noscat.MeshMember
+import uniffi.noscat.MemberState
 
 // ------------------------------------------------------------- palette
 
@@ -206,7 +207,13 @@ fun MeshMember.presence(nowMs: Long): Presence {
 }
 
 /** The line under a device's name. */
-fun MeshMember.presenceText(nowMs: Long): String = when (presence(nowMs)) {
+fun MeshMember.presenceText(nowMs: Long): String = when {
+    state == MemberState.NEVER_JOINED -> "never joined: remove it and invite it again"
+    state == MemberState.PENDING && !connected -> "joining (invitation sent)"
+    else -> presenceLine(nowMs)
+}
+
+private fun MeshMember.presenceLine(nowMs: Long): String = when (presence(nowMs)) {
     Presence.Connected -> "connected"
     Presence.Connecting -> "connecting..."
     Presence.Unreachable -> "online, can't connect"
