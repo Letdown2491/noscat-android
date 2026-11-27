@@ -143,7 +143,7 @@ on a warm cache). The Rust build is the debug profile unless `PROFILE=release`
 afterwards). `scripts/build-release.sh` does that plus a signed `assembleRelease`
 (signing from the git-ignored `keystore.properties`; the keystore lives outside the
 repo, never commit either). Version: `versionName` shares noscat's major.minor
-(0.6.x runs noscat 0.6) and its patch counts app-only releases (0.5.1 was the
+(0.7.x runs noscat 0.7) and its patch counts app-only releases (0.5.1 was the
 UX pass, matching noscat-desktop 0.5.1); `versionCode` goes up every release.
 
 ```
@@ -272,4 +272,4 @@ Kotlin bindings regenerate with it.
 - When Gradle work happens, prefer lockfiles and pinned versions so builds are
   reproducible from a clean checkout.
 - Work on `master`; commit and push there. Releases are tagged `vX.Y.Z`
-  (latest: v0.6.0) with the signed APK attached.
+  (latest: v0.7.0) with the signed APK attached.

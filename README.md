@@ -9,7 +9,7 @@ the protocol lives in the Noscat workspace (`noscat-core`/`noscat-client`/
 Status: chat, file send/receive, port forwards to a member's services,
 clipboard sharing, joining a mesh by scanning a member's QR, and (new in
 0.6) terminals on the mesh's computers and a choice of who may send things
-to the phone. Version 0.6.0 runs Noscat 0.6.0 (the `noscat-ffi` crate from
+to the phone. Version 0.7.0 runs Noscat 0.7.0 (the `noscat-ffi` crate from
 crates.io); `./scripts/build-native.sh local` builds against unreleased
 changes in a local Noscat checkout. Roadmap and agent guidance in
 [AGENTS.md](AGENTS.md).
@@ -111,7 +111,7 @@ Two steps: the native bridge, then the app.
    `app/src/main/jniLibs/`, and regenerates the Kotlin bindings):
 
    ```
-   ./scripts/build-native.sh            # the published noscat-ffi (default 0.6.0)
+   ./scripts/build-native.sh            # the published noscat-ffi (default 0.7.0)
    ./scripts/build-native.sh local      # or unreleased changes in ~/Documents/noscat
    ```
 
